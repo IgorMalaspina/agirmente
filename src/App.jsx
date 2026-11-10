@@ -4,9 +4,9 @@ import { loadWorkspace, removeTask, saveMessage, saveProfile, saveTask } from '.
 import brandIcon from './assets/agirmente-app-icon.png'
 import brandLogo from './assets/agirmente-horizontal-logo.png'
 import {
-  ArrowRight, ArrowUpRight, Bell, CalendarDays, Check, CheckCheck, ChevronDown,
+  ArrowRight, ArrowUpRight, Bell, BellRing, CalendarDays, Check, CheckCheck, ChevronDown,
   CircleDollarSign, CircleHelp, Clock3, Command, Compass, Filter, Focus, History, Inbox, Lightbulb,
-  ListChecks, ListTodo, LogOut, MessageCircle, Mic, MoreHorizontal, Plus, Save, Search, Send, Settings2, Sparkles,
+  ListChecks, ListTodo, LogOut, MessageCircle, Mic, MoreHorizontal, Plus, Repeat2, Save, Search, Send, Settings2, Sparkles,
   Sun, Tag, Target, Trash2, UserRound, X,
 } from 'lucide-react'
 
@@ -38,6 +38,22 @@ function BrandMark() {
 
 const inputDate = (value) => value ? new Date(value).toISOString().slice(0, 10) : ''
 const dateFromInput = (value) => value ? new Date(`${value}T12:00:00`).toISOString() : null
+const localDateString = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+const dateTimeInput = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  return `${localDateString(date)}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+const dateTimeFromInput = (value) => value ? new Date(value).toISOString() : null
+const nextOccurrence = (dateValue, recurrence) => {
+  const date = dateValue ? new Date(dateValue) : new Date()
+  date.setHours(12, 0, 0, 0)
+  if (recurrence === 'diaria') date.setDate(date.getDate() + 1)
+  else if (recurrence === 'dias_uteis') { date.setDate(date.getDate() + 1); if (date.getDay() === 6) date.setDate(date.getDate() + 2); if (date.getDay() === 0) date.setDate(date.getDate() + 1) }
+  else if (recurrence === 'semanal') date.setDate(date.getDate() + 7)
+  else if (recurrence === 'mensal') date.setMonth(date.getMonth() + 1)
+  return date.toISOString()
+}
 const eventLabels = {
   criada: 'Atividade criada', iniciada: 'Atividade iniciada', pausada: 'Atividade pausada',
   retomada: 'Atividade retomada', aguardando_alguem: 'Aguardando retorno', cobranca_feita: 'Cobrança registrada',
@@ -62,22 +78,24 @@ function AuthGate() {
   return <main className="auth-screen"><div className="auth-brand"><img src={brandLogo} alt="AGIRMENTE — Seu jeito de pensar. Sua maneira de transformar." /></div><section className="auth-card"><div className="eyebrow"><Sparkles size={15} /> UM LUGAR PARA COMEÇAR</div><h1>Seus pensamentos<br />podem respirar.</h1><p>Entre para continuar organizando as coisas do seu jeito.</p><form onSubmit={submit} className="auth-form"><label>E-mail<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required placeholder="voce@email.com" autoComplete="email" /></label><label>Senha<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength="6" placeholder="Pelo menos 6 caracteres" autoComplete={isSignup ? 'new-password' : 'current-password'} /></label><button className="primary-button full" disabled={busy}>{busy ? 'Só um instante…' : isSignup ? 'Criar minha conta' : 'Entrar'}<ArrowRight size={17} /></button></form>{notice && <div className="notice">{notice}</div>}<button className="text-button auth-toggle" onClick={() => { setIsSignup(!isSignup); setNotice('') }}>{isSignup ? 'Já tenho uma conta' : 'Ainda não tenho conta'}</button><div className="auth-note">Seus dados ficam protegidos e pertencem a você.</div></section><div className="auth-footer">Seu jeito de pensar. Sua maneira de transformar.</div></main>
 }
 
-function TaskRow({ task, onStatus, onDelete, onPrioritize, onCategory, onOpen, categories = [], compact = false }) {
+function TaskRow({ task, onStatus, onDelete, onPrioritize, onCategory, onOpen, onToggleFocus, isFocused = false, categories = [], compact = false }) {
   const done = task.status === 'done'
   const isCharge = task.task_type === 'cobranca'
   return <article className={`task-row ${compact ? 'compact' : ''} ${done ? 'is-done' : ''}`}>
     <button className={`task-check ${done ? 'checked' : ''} ${isCharge ? 'task-check-charge' : ''}`} aria-label={isCharge ? 'Abrir detalhes da cobrança' : done ? 'Reabrir atividade' : 'Concluir atividade'} onClick={() => isCharge ? onOpen?.(task) : onStatus(task, { status: done ? 'next' : 'done' })}>{done ? <Check size={14} /> : isCharge ? <CircleDollarSign size={13} /> : null}</button>
-    <div className="task-main"><button className="task-open-button" onClick={() => onOpen?.(task)}><span className="task-title-line"><span className="task-title">{task.title}</span>{task.priority === 1 && <span className="priority-dot" title="Prioridade alta" />}</span><ArrowUpRight size={14} className="task-open-icon" aria-hidden="true" /></button><div className="task-meta"><select className="category-select" aria-label={`Categoria: ${task.title}`} value={task.category || 'Entrada'} onChange={(event) => onCategory?.(task, event.target.value)}><option value="Entrada">Entrada</option>{categories.map((category) => <option value={category} key={category}>{category}</option>)}</select>{task.task_type === 'cobranca' && <span className="task-kind-pill"><CircleDollarSign size={12} /> Cobrança</span>}{task.status === 'waiting' && <span className="task-waiting-pill">Aguardando retorno</span>}{task.due_at && <><span className="meta-separator">·</span><span className={new Date(task.due_at).toDateString() === new Date().toDateString() ? 'due-today' : ''}><CalendarDays size={12} />{dateLabel(dateFromInput(inputDate(task.due_at)))}</span></>}{task.status === 'waiting' && task.follow_up_at && <><span className="meta-separator">·</span><span><History size={12} />Cobrar {dateLabel(task.follow_up_at)}</span></>}</div></div>
-    <div className="task-actions">{task.status === 'paused' ? <button className="mini-action" onClick={() => onStatus(task, { status: 'next' })}>Retomar</button> : task.status !== 'done' && <button className="mini-action" onClick={() => onStatus(task, { status: 'paused' })}>Pausar</button>}<button className="icon-button subtle" title="Priorizar" onClick={() => onPrioritize(task)}><ArrowUpRight size={16} /></button><button className="icon-button subtle delete-action" title="Excluir" onClick={() => onDelete(task)}><Trash2 size={15} /></button></div>
+    <div className="task-main"><button className="task-open-button" onClick={() => onOpen?.(task)}><span className="task-title-line"><span className="task-title">{task.title}</span>{task.priority === 1 && <span className="priority-dot" title="Prioridade alta" />}</span><ArrowUpRight size={14} className="task-open-icon" aria-hidden="true" /></button><div className="task-meta"><select className="category-select" aria-label={`Categoria: ${task.title}`} value={task.category || 'Entrada'} onChange={(event) => onCategory?.(task, event.target.value)}><option value="Entrada">Entrada</option>{categories.map((category) => <option value={category} key={category}>{category}</option>)}</select>{task.task_type === 'cobranca' && <span className="task-kind-pill"><CircleDollarSign size={12} /> Cobrança</span>}{task.status === 'waiting' && <span className="task-waiting-pill">Aguardando retorno</span>}{task.due_at && <><span className="meta-separator">·</span><span className={new Date(task.due_at).toDateString() === new Date().toDateString() ? 'due-today' : ''}><CalendarDays size={12} />{dateLabel(dateFromInput(inputDate(task.due_at)))}</span></>}{task.estimated_minutes && <span><Clock3 size={12} />{task.estimated_minutes} min</span>}{task.steps?.length > 0 && <span><ListChecks size={12} />{task.steps.filter((step) => step.done).length}/{task.steps.length}</span>}{task.status === 'waiting' && task.follow_up_at && <><span className="meta-separator">·</span><span><History size={12} />Cobrar {dateLabel(task.follow_up_at)}</span></>}</div></div>
+    <div className="task-actions">{task.status !== 'done' && <button className={`mini-action ${isFocused ? 'focus-selected-action' : ''}`} onClick={() => onToggleFocus?.(task)}>{isFocused ? 'No foco' : 'Adicionar ao foco'}</button>}{task.status === 'paused' ? <button className="mini-action" onClick={() => onStatus(task, { status: 'next' })}>Retomar</button> : task.status !== 'done' && <button className="mini-action" onClick={() => onStatus(task, { status: 'paused' })}>Pausar</button>}<button className="icon-button subtle" title="Priorizar" onClick={() => onPrioritize(task)}><ArrowUpRight size={16} /></button><button className="icon-button subtle delete-action" title="Excluir" onClick={() => onDelete(task)}><Trash2 size={15} /></button></div>
   </article>
 }
 
-function TaskDetailModal({ task, categories, onClose, onSave, onDelete }) {
+function TaskDetailModal({ task, categories, onClose, onSave, onDelete, onSkip }) {
   const [draft, setDraft] = useState(() => ({
-    title: task.title || '', notes: task.notes || '', next_step: task.steps?.[0] || '', category: task.category || 'Entrada',
+    title: task.title || '', notes: task.notes || '', steps: (task.steps || []).map((step, index) => typeof step === 'string' ? { id: `step-${index}`, title: step, done: false } : { ...step }), category: task.category || 'Entrada',
     status: task.status || 'inbox', priority: String(task.priority || 2), due_at: inputDate(task.due_at),
     task_type: task.task_type || 'tarefa', assignee: task.assignee || '', tags: (task.tags || []).join(', '), follow_up_at: inputDate(task.follow_up_at),
+    estimated_minutes: task.estimated_minutes ? String(task.estimated_minutes) : '', reminder_at: dateTimeInput(task.reminder_at), recurrence: task.recurrence || 'nenhuma',
   }))
+  const [newStep, setNewStep] = useState('')
   const [updateNote, setUpdateNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -90,15 +108,28 @@ function TaskDetailModal({ task, categories, onClose, onSave, onDelete }) {
   }, [onClose])
 
   function change(field, value) { setDraft((current) => ({ ...current, [field]: value })) }
+  function addStep(event) {
+    event?.preventDefault()
+    const title = cleanText(newStep)
+    if (!title) return
+    setDraft((current) => ({ ...current, steps: [...current.steps, { id: makeId(), title, done: false }] }))
+    setNewStep('')
+  }
+  function toggleStep(id) { setDraft((current) => ({ ...current, steps: current.steps.map((step) => step.id === id ? { ...step, done: !step.done } : step) })) }
+  function removeStep(id) { setDraft((current) => ({ ...current, steps: current.steps.filter((step) => step.id !== id) })) }
   async function commit(status = draft.status) {
     setSaving(true); setError('')
     const changes = {
-      title: draft.title.trim(), notes: draft.notes.trim(), steps: draft.next_step.trim() ? [draft.next_step.trim()] : [],
+      title: draft.title.trim(), notes: draft.notes.trim(), steps: draft.steps,
       category: draft.category, status, priority: Number(draft.priority), due_at: dateFromInput(draft.due_at),
       task_type: draft.task_type, assignee: draft.assignee.trim(), tags: [...new Set(draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean))],
       follow_up_at: draft.task_type === 'cobranca' ? dateFromInput(draft.follow_up_at) : null,
+      estimated_minutes: draft.estimated_minutes ? Number(draft.estimated_minutes) : null,
+      reminder_at: dateTimeFromInput(draft.reminder_at),
+      reminded_at: draft.reminder_at !== dateTimeInput(task.reminder_at) ? null : task.reminded_at || null,
+      recurrence: draft.recurrence,
     }
-    if (status === 'done') changes.completed_at = new Date().toISOString()
+    if (status === 'done' && task.status !== 'done') changes.completed_at = new Date().toISOString()
     if (!changes.title) { setError('Dê um nome para esta atividade.'); setSaving(false); return }
     const result = await onSave(task, changes, updateNote.trim())
     setSaving(false)
@@ -125,7 +156,10 @@ function TaskDetailModal({ task, categories, onClose, onSave, onDelete }) {
           <label className="detail-field">Responsável<input value={draft.assignee} onChange={(event) => change('assignee', event.target.value)} placeholder="Você ou outra pessoa" maxLength="100" /></label>
           <label className="detail-field detail-wide"><span className="field-label-icon"><Tag size={14} /> Etiquetas</span><input value={draft.tags} onChange={(event) => change('tags', event.target.value)} placeholder="Ex.: cliente, financeiro, urgente" /><span>Separe por vírgulas.</span></label>
           {draft.task_type === 'cobranca' && <label className="detail-field detail-wide follow-up-field"><span className="field-label-icon"><History size={15} /> Próxima data para cobrar</span><input type="date" value={draft.follow_up_at} onChange={(event) => change('follow_up_at', event.target.value)} /><span>A cobrança continua aberta e volta ao foco nessa data.</span></label>}
-          <label className="detail-field detail-wide"><span className="field-label-icon"><ListChecks size={14} /> Próximo passo</span><input value={draft.next_step} onChange={(event) => change('next_step', event.target.value)} placeholder="Uma ação pequena que ajude a avançar" maxLength="180" /></label>
+          <section className="detail-field detail-wide step-builder"><span className="field-label-icon"><ListChecks size={14} /> Pequenos passos</span><p>Quebre a atividade em partes menores. Marque cada uma quando fizer sentido.</p><div className="step-list">{draft.steps.map((step) => <div className={`step-row ${step.done ? 'is-step-done' : ''}`} key={step.id}><label><input type="checkbox" checked={Boolean(step.done)} onChange={() => toggleStep(step.id)} /><span>{step.title}</span></label><button type="button" className="icon-button subtle" aria-label={`Remover passo ${step.title}`} onClick={() => removeStep(step.id)}><X size={14} /></button></div>)}</div><div className="step-add-row"><input value={newStep} onChange={(event) => setNewStep(event.target.value)} placeholder="Ex.: abrir o documento" maxLength="180" onKeyDown={(event) => { if (event.key === 'Enter') addStep(event) }} /><button type="button" className="secondary-button" disabled={!newStep.trim()} onClick={addStep}><Plus size={14} /> Adicionar passo</button></div></section>
+          <label className="detail-field">Tempo estimado<select value={draft.estimated_minutes} onChange={(event) => change('estimated_minutes', event.target.value)}><option value="">Sem estimativa</option>{[5, 10, 15, 25, 30, 45, 60, 90, 120].map((minutes) => <option value={minutes} key={minutes}>{minutes < 60 ? `${minutes} minutos` : `${minutes / 60} hora${minutes > 60 ? 's' : ''}`}</option>)}</select></label>
+          <label className="detail-field"><span className="field-label-icon"><Repeat2 size={14} /> Repetir</span><select value={draft.recurrence} onChange={(event) => change('recurrence', event.target.value)}><option value="nenhuma">Não repetir</option><option value="diaria">Todos os dias</option><option value="dias_uteis">Dias úteis</option><option value="semanal">Toda semana</option><option value="mensal">Todo mês</option></select></label>
+          <label className="detail-field detail-wide"><span className="field-label-icon"><BellRing size={14} /> Lembrete</span><input type="datetime-local" value={draft.reminder_at} onChange={(event) => change('reminder_at', event.target.value)} /><span>O lembrete aparece enquanto o AGIRMENTE estiver aberto neste navegador.</span></label>
           <label className="detail-field detail-wide">Mais informações<textarea value={draft.notes} onChange={(event) => change('notes', event.target.value)} rows="4" placeholder="Contexto, links, detalhes para lembrar…" /></label>
         </div>
         <section className="detail-history"><div className="detail-section-heading"><span className="detail-section-icon"><History size={16} /></span><div><h3>Histórico de atualizações</h3><p>Um registro simples do que mudou.</p></div></div>
@@ -133,7 +167,7 @@ function TaskDetailModal({ task, categories, onClose, onSave, onDelete }) {
           <div className="timeline">{(task.history || []).length ? task.history.map((event) => <article className="timeline-entry" key={event.id}><span className="timeline-dot" /><div><div className="timeline-title">{eventLabels[event.event_type] || 'Atualização'}<time>{new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(event.created_at))}</time></div>{event.note && <p>{event.note}</p>}</div></article>) : <p className="timeline-empty">As próximas mudanças aparecerão aqui.</p>}</div>
         </section>
         {error && <div className="detail-error" role="alert">{error}</div>}
-        <footer className="detail-footer"><button type="button" className="detail-delete" onClick={() => onDelete(task)}><Trash2 size={15} /> Excluir</button><div className="detail-footer-actions"><button type="button" className="detail-cancel" onClick={onClose}>Fechar</button>{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-charge" onClick={registerCharge} disabled={saving}><History size={15} /> Registrar cobrança</button>}<button className="primary-button detail-save" disabled={saving}>{saving ? 'Salvando…' : <><Save size={15} /> Salvar alterações</>}</button>{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-finish" onClick={finish} disabled={saving}><Check size={15} /> Concluir e arquivar</button>}</div></footer>
+        <footer className="detail-footer"><button type="button" className="detail-delete" onClick={() => onDelete(task)}><Trash2 size={15} /> Excluir</button><div className="detail-footer-actions">{draft.recurrence !== 'nenhuma' && draft.status !== 'done' && <button type="button" className="detail-cancel" onClick={() => onSkip(task)}>Pular esta vez</button>}<button type="button" className="detail-cancel" onClick={onClose}>Fechar</button>{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-charge" onClick={registerCharge} disabled={saving}><History size={15} /> Registrar cobrança</button>}<button className="primary-button detail-save" disabled={saving}>{saving ? 'Salvando…' : <><Save size={15} /> Salvar alterações</>}</button>{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-finish" onClick={finish} disabled={saving}><Check size={15} /> Concluir e arquivar</button>}</div></footer>
       </form>
     </section>
   </div>
@@ -144,20 +178,27 @@ function App() {
   const [authLoading, setAuthLoading] = useState(supabaseReady)
   const [tab, setTab] = useState('home')
   const [tasks, setTasks] = useState([])
-  const [profile, setProfile] = useState({ name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'] })
+  const [profile, setProfile] = useState({ name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'], settings: { reduceMotion: false, highContrast: false } })
   const [messages, setMessages] = useState([])
   const [capture, setCapture] = useState('')
   const [filter, setFilter] = useState('Tudo')
+  const [queueView, setQueueView] = useState('lista')
+  const [sortBy, setSortBy] = useState('data')
   const [query, setQuery] = useState('')
   const [chatDraft, setChatDraft] = useState('')
   const [toast, setToast] = useState('')
+  const [reminderTask, setReminderTask] = useState(null)
   const [loadingWorkspace, setLoadingWorkspace] = useState(true)
   const [busy, setBusy] = useState(false)
   const [profileName, setProfileName] = useState('Alex')
   const [newCategory, setNewCategory] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState(null)
+  const [pendingDelete, setPendingDelete] = useState(null)
+  const [notificationPermission, setNotificationPermission] = useState(() => 'Notification' in window ? Notification.permission : 'unsupported')
   const captureRef = useRef(null)
   const chatRef = useRef(null)
+  const firedReminders = useRef(new Set())
+  const focusActionLock = useRef(false)
 
   useEffect(() => {
     if (!supabaseReady) { setAuthLoading(false); return }
@@ -177,20 +218,55 @@ function App() {
   }, [user?.id])
 
   useEffect(() => { if (tab === 'assistant') chatRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages, tab])
-  useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 2800); return () => clearTimeout(timer) }, [toast])
+  useEffect(() => { if (!toast) return; const timer = setTimeout(() => { setToast(''); setReminderTask(null) }, pendingDelete || reminderTask ? 8000 : 2800); return () => clearTimeout(timer) }, [toast, pendingDelete, reminderTask])
+  useEffect(() => {
+    if (!pendingDelete) return
+    const timer = setTimeout(async () => {
+      try { await removeTask(pendingDelete.id) } catch (error) { showError(error) }
+      setPendingDelete(null)
+    }, 8000)
+    return () => clearTimeout(timer)
+  }, [pendingDelete])
+  useEffect(() => {
+    const checkReminders = async () => {
+      const now = Date.now()
+      for (const task of tasks) {
+        if (task.status === 'done' || !task.reminder_at || task.reminded_at || new Date(task.reminder_at).getTime() > now || firedReminders.current.has(task.id)) continue
+        firedReminders.current.add(task.id)
+        const message = `Lembrete: ${task.title}`
+        try {
+          if ('Notification' in window && Notification.permission === 'granted') {
+            const notice = new Notification('AGIRMENTE', { body: message, icon: brandIcon, tag: `agirmente-${task.id}` })
+            notice.onclick = () => { window.focus(); setSelectedTaskId(task.id); setTab('queue'); notice.close() }
+          }
+        } catch {}
+        setToast(message)
+        setReminderTask(task)
+        const updated = { ...task, reminded_at: new Date().toISOString() }
+        try {
+          const stored = await saveTask(updated, user?.id)
+          setTasks((items) => items.map((item) => item.id === task.id ? stored : item))
+        } catch (error) { firedReminders.current.delete(task.id); showError(error) }
+      }
+    }
+    checkReminders()
+    const timer = setInterval(checkReminders, 30000)
+    return () => clearInterval(timer)
+  }, [tasks, user?.id])
 
   function showError(error) { setToast(error?.message || 'Não foi possível salvar agora. Tente de novo.') }
   async function addTask(raw, category = 'Entrada') {
     const title = cleanText(raw)
     if (!title) return null
-    const task = { id: makeId(), title, category, task_type: 'tarefa', assignee: '', tags: [], follow_up_at: null, status: 'inbox', priority: 3, due_at: null, notes: '', steps: [], history: [], created_at: new Date().toISOString() }
+    const task = { id: makeId(), title, category, task_type: 'tarefa', assignee: '', tags: [], follow_up_at: null, status: 'inbox', priority: 3, due_at: null, reminder_at: null, reminded_at: null, estimated_minutes: null, focus_date: null, recurrence: 'nenhuma', notes: '', steps: [], history: [], created_at: new Date().toISOString() }
     try { const stored = await saveTask(task, user?.id, { event_type: 'criada', note: 'Atividade adicionada à fila.' }); setTasks((items) => [stored, ...items]); return stored } catch (error) { showError(error); return null }
   }
   async function updateTask(task, changes, activityNote = '') {
-    const updated = { ...task, ...changes }
+    if (changes.reminder_at !== undefined && changes.reminder_at !== task.reminder_at) firedReminders.current.delete(task.id)
+    const updated = { ...task, ...changes, ...(changes.status === 'done' ? { focus_date: null, reminder_at: null, reminded_at: null } : {}) }
     let eventType = 'atualizada'
-    if (changes.status === 'done') eventType = 'concluida'
-    else if (task.status === 'done' && changes.status) eventType = 'reaberta'
+    if (changes.status === 'done' && task.status !== 'done') eventType = 'concluida'
+    else if (task.status === 'done' && changes.status && changes.status !== 'done') eventType = 'reaberta'
     else if (changes.status === 'waiting') eventType = updated.task_type === 'cobranca' ? 'cobranca_feita' : 'aguardando_alguem'
     else if (task.status === 'waiting' && changes.status) eventType = 'retomada'
     else if (changes.status === 'paused') eventType = 'pausada'
@@ -199,26 +275,80 @@ function App() {
     try {
       const stored = await saveTask(updated, user?.id, { event_type: eventType, note: activityNote || defaultNote, details: { fields: Object.keys(changes), status: updated.status } })
       setTasks((items) => items.map((item) => item.id === task.id ? stored : item))
-      setToast(eventType === 'concluida' ? 'Concluída e arquivada. Feito no seu tempo.' : eventType === 'cobranca_feita' ? 'Cobrança registrada. A atividade continua aberta para o próximo retorno.' : eventType === 'pausada' ? 'Tudo bem pausar. Você pode retomar quando quiser.' : eventType === 'retomada' ? 'Atividade de volta à fila.' : 'Atividade atualizada.')
+      if (eventType === 'concluida' && updated.recurrence && updated.recurrence !== 'nenhuma') {
+        const nextTask = { ...updated, id: makeId(), status: 'next', completed_at: null, started_at: null, paused_at: null, focus_date: null, reminder_at: null, reminded_at: null, due_at: nextOccurrence(updated.due_at, updated.recurrence), steps: (updated.steps || []).map((step) => ({ ...step, id: makeId(), done: false })), history: [], created_at: new Date().toISOString() }
+        const nextStored = await saveTask(nextTask, user?.id, { event_type: 'criada', note: 'Próxima ocorrência criada pela recorrência.' })
+        setTasks((items) => [nextStored, ...items.filter((item) => item.id !== task.id), stored])
+        setToast('Concluída. A próxima ocorrência já ficou guardada.')
+      } else setToast(eventType === 'concluida' ? 'Concluída e arquivada. Feito no seu tempo.' : eventType === 'cobranca_feita' ? 'Cobrança registrada. A atividade continua aberta para o próximo retorno.' : eventType === 'pausada' ? 'Tudo bem pausar. Você pode retomar quando quiser.' : eventType === 'retomada' ? 'Atividade de volta à fila.' : 'Atividade atualizada.')
       return stored
     } catch (error) { showError(error); return null }
   }
   async function deleteTask(task) {
-    try { await removeTask(task.id); setTasks((items) => items.filter((item) => item.id !== task.id)); setToast('Atividade removida.') } catch (error) { showError(error) }
+    if (pendingDelete) { try { await removeTask(pendingDelete.id) } catch (error) { showError(error) } }
+    setTasks((items) => items.filter((item) => item.id !== task.id))
+    setPendingDelete(task)
+    setSelectedTaskId(null)
+    setToast('Atividade removida da lista.')
   }
-  async function addToToday(task) { await updateTask(task, { status: 'next', priority: 1 }) }
+  function undoDelete() {
+    if (!pendingDelete) return
+    setTasks((items) => [pendingDelete, ...items])
+    setPendingDelete(null)
+    setToast('Atividade recuperada.')
+  }
+  async function toggleFocus(task) {
+    if (focusActionLock.current) return
+    const today = localDateString()
+    const isFocused = task.focus_date === today
+    if (!isFocused && focusTasks.length >= 3) { setToast('Seu foco já tem três atividades. Retire uma para abrir espaço.'); return }
+    focusActionLock.current = true
+    try {
+      const result = await updateTask(task, { focus_date: isFocused ? null : today, ...(task.status === 'paused' && !isFocused ? { status: 'next' } : {}) }, isFocused ? 'Removida do Foco agora.' : 'Adicionada ao Foco agora.')
+      if (!result) return
+      setToast(isFocused ? 'Saiu do seu foco. Continua guardada na fila.' : 'Adicionada ao seu foco de hoje.')
+    } finally { focusActionLock.current = false }
+  }
+  async function skipOccurrence(task) {
+    if (!task.recurrence || task.recurrence === 'nenhuma') return
+    await updateTask(task, { due_at: nextOccurrence(task.due_at, task.recurrence), focus_date: null, reminder_at: null, reminded_at: null, status: 'next' }, 'Esta ocorrência foi pulada. A próxima ficou agendada.')
+    setSelectedTaskId(null)
+  }
+  async function enableNotifications() {
+    if (!('Notification' in window)) { setToast('Este navegador não oferece notificações. Os lembretes ainda aparecem no app aberto.'); return }
+    const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
+    setNotificationPermission(permission)
+    setToast(permission === 'granted' ? 'Notificações ativadas neste navegador.' : 'Tudo bem. Os lembretes continuarão aparecendo dentro do app.')
+  }
+  async function snoozeReminder(minutes) {
+    if (!reminderTask) return
+    const newReminder = new Date(Date.now() + minutes * 60000).toISOString()
+    const result = await updateTask(reminderTask, { reminder_at: newReminder, reminded_at: null }, `Lembrete adiado por ${minutes < 60 ? `${minutes} minutos` : 'um dia'}.`)
+    if (result) setToast(`Lembrete adiado. Volto a mostrar “${reminderTask.title}” depois.`)
+    setReminderTask(null)
+  }
+  async function updatePreference(key, value) {
+    const nextProfile = { ...profile, settings: { ...(profile.settings || {}), [key]: value } }
+    try { const saved = await saveProfile(nextProfile, user?.id); setProfile(saved); setToast('Preferência atualizada.') } catch (error) { showError(error) }
+  }
   const activeTasks = useMemo(() => tasks.filter((task) => task.status !== 'done'), [tasks])
-  const focusTasks = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10)
-    return activeTasks.filter((task) => task.status !== 'paused' && !(task.status === 'waiting' && task.follow_up_at && inputDate(task.follow_up_at) > today))
-      .sort((a, b) => a.priority - b.priority || (a.follow_up_at || a.due_at || '9999').localeCompare(b.follow_up_at || b.due_at || '9999')).slice(0, 3)
-  }, [activeTasks])
+  const focusTasks = useMemo(() => activeTasks.filter((task) => task.focus_date === localDateString() && task.status !== 'paused'), [activeTasks])
   const visibleTasks = useMemo(() => tasks.filter((task) => {
     const searchable = [task.title, task.notes, task.assignee, ...(task.tags || [])].join(' ').toLocaleLowerCase('pt-BR')
     const matchesQuery = searchable.includes(query.toLocaleLowerCase('pt-BR'))
-    const matchesFilter = filter === 'Tudo' || (filter === 'Caixa de entrada' ? task.status === 'inbox' : filter === 'Em andamento' ? task.status === 'doing' : filter === 'Aguardando retorno' ? task.status === 'waiting' : filter === 'Pausadas' ? task.status === 'paused' : filter === 'Concluídas' ? task.status === 'done' : task.category === filter)
+    const matchesFilter = filter === 'Tudo' || (filter.startsWith('Etiqueta:') ? (task.tags || []).includes(filter.slice(9)) : filter === 'Com lembrete' ? Boolean(task.reminder_at) : filter === 'Sem prazo' ? !task.due_at : filter === 'Caixa de entrada' ? task.status === 'inbox' : filter === 'Em andamento' ? task.status === 'doing' : filter === 'Aguardando retorno' ? task.status === 'waiting' : filter === 'Pausadas' ? task.status === 'paused' : filter === 'Concluídas' ? task.status === 'done' : task.category === filter)
     return matchesQuery && matchesFilter
-  }), [tasks, query, filter])
+  }).sort((a, b) => sortBy === 'prioridade' ? a.priority - b.priority : sortBy === 'tempo' ? (a.estimated_minutes || Infinity) - (b.estimated_minutes || Infinity) : (a.due_at || a.follow_up_at || '9999').localeCompare(b.due_at || b.follow_up_at || '9999')), [tasks, query, filter, sortBy])
+  const agendaGroups = useMemo(() => {
+    const groups = new Map()
+    for (const task of visibleTasks.filter((item) => item.status !== 'done')) {
+      const scheduleDate = task.due_at || task.follow_up_at
+      const key = scheduleDate ? localDateString(new Date(scheduleDate)) : 'sem-data'
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(task)
+    }
+    return [...groups.entries()].sort(([a], [b]) => a === 'sem-data' ? 1 : b === 'sem-data' ? -1 : a.localeCompare(b)).map(([key, items]) => ({ key, items, label: key === 'sem-data' ? 'Sem data marcada' : key === localDateString() ? 'Hoje' : key === localDateString(new Date(Date.now() + 86400000)) ? 'Amanhã' : new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${key}T12:00:00`)) }))
+  }, [visibleTasks])
   const selectedTask = tasks.find((task) => task.id === selectedTaskId)
 
   function openTask(task) { setSelectedTaskId(task.id) }
@@ -290,7 +420,7 @@ function App() {
   const doingCount = tasks.filter((task) => task.status === 'doing').length
   const completionRate = tasks.length ? Math.round((completedCount / tasks.length) * 100) : 0
 
-  return <div className="app-shell">
+  return <div className={`app-shell ${profile.settings?.highContrast ? 'high-contrast' : ''} ${profile.settings?.reduceMotion ? 'reduce-motion' : ''}`}>
     <aside className="sidebar">
       <button className="brand" onClick={() => setTab('home')}><BrandMark /><span className="brand-word">agirmente</span></button>
       <button className="capture-shortcut" onClick={() => { setTab('home'); setTimeout(() => captureRef.current?.focus(), 0) }}><Plus size={17} /><span>Capturar pensamento</span><kbd>⌘ K</kbd></button>
@@ -300,7 +430,7 @@ function App() {
     </aside>
 
     <main className="main-area">
-      <header className="topbar"><div className="mobile-brand"><BrandMark /> agirmente</div><div className="breadcrumb"><span>Espaço pessoal</span><span className="breadcrumb-slash">/</span><strong>{currentNavigation?.label}</strong></div><div className="topbar-actions"><span className={`connection-status ${supabaseReady ? 'cloud' : ''}`}><span className="status-dot" />{supabaseReady ? 'Sincronizado' : 'Salvo neste dispositivo'}</span><button className="icon-button notification-button" title="Notificações"><Bell size={17} /><i /></button><button className="top-avatar" onClick={() => setTab('profile')}>{firstName.slice(0, 1).toUpperCase()}</button></div></header>
+      <header className="topbar"><div className="mobile-brand"><BrandMark /> agirmente</div><div className="breadcrumb"><span>Espaço pessoal</span><span className="breadcrumb-slash">/</span><strong>{currentNavigation?.label}</strong></div><div className="topbar-actions"><span className={`connection-status ${supabaseReady ? 'cloud' : ''}`}><span className="status-dot" />{supabaseReady ? 'Sincronizado' : 'Salvo neste dispositivo'}</span><button className="icon-button notification-button" title={notificationPermission === 'granted' ? 'Notificações ativadas' : 'Ativar notificações'} aria-label="Ativar notificações" onClick={enableNotifications}><Bell size={17} /><i /></button><button className="top-avatar" onClick={() => setTab('profile')}>{firstName.slice(0, 1).toUpperCase()}</button></div></header>
       {!supabaseReady && <div className="local-banner"><span>Modo local: suas informações ficam salvas neste navegador.</span><button onClick={() => setTab('profile')}>Ver perfil <ArrowRight size={14} /></button></div>}
       <div className="page-content">
         {loadingWorkspace ? <div className="page-loading">Organizando seu espaço…</div> : <>
@@ -315,7 +445,7 @@ function App() {
             <div className="home-dashboard-grid">
               <section className="home-tasks-panel">
                 <div className="home-panel-heading"><div><div className="section-kicker">PARA ESTE MOMENTO</div><h2>Próximas tarefas <span className="soft-count">{focusTasks.length}/3</span></h2></div><button className="text-link" onClick={() => setTab('focus')}>Ver todas <ArrowRight size={15} /></button></div>
-                <div className="home-focus-list">{focusTasks.length ? focusTasks.slice(0, 3).map((task, index) => <div className="focus-preview" key={task.id}><span className={`focus-number ${index === 0 ? 'current' : ''}`}>{String(index + 1).padStart(2, '0')}</span><TaskRow task={task} categories={profile.categories} compact onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} /></div>) : <div className="empty-state inline-empty"><div className="empty-icon"><CheckCheck size={20} /></div><strong>Espaço para respirar.</strong><span>Nenhuma atividade precisa do seu foco agora.</span></div>}</div>
+                <div className="home-focus-list">{focusTasks.length ? focusTasks.map((task, index) => <div className="focus-preview" key={task.id}><span className={`focus-number ${index === 0 ? 'current' : ''}`}>{String(index + 1).padStart(2, '0')}</span><TaskRow task={task} categories={profile.categories} compact isFocused onToggleFocus={toggleFocus} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} /></div>) : <div className="empty-state inline-empty"><div className="empty-icon"><CheckCheck size={20} /></div><strong>Espaço para respirar.</strong><span>Escolha até três atividades na sua fila, sem pressa.</span></div>}</div>
               </section>
               <section className="home-progress-panel">
                 <div className="home-panel-heading"><div><div className="section-kicker">SEM PRESSA</div><h2>Seu progresso</h2></div><span className="progress-period">Agora</span></div>
@@ -326,20 +456,30 @@ function App() {
             <div className="bottom-cards"><button className="bottom-card" onClick={() => { setTab('queue'); setFilter('Caixa de entrada') }}><span className="bottom-card-icon inbox-icon"><Inbox size={18} /></span><span className="bottom-card-copy"><strong>Caixa de entrada</strong><small>Ideias esperando um lugar</small></span><span className="bottom-card-count">{tasks.filter((task) => task.status === 'inbox').length}</span><ArrowRight size={16} className="bottom-card-arrow" /></button><button className="bottom-card" onClick={() => setTab('assistant')}><span className="bottom-card-icon assistant-icon"><Sparkles size={18} /></span><span className="bottom-card-copy"><strong>Precisa de clareza?</strong><small>Converse com seu assistente</small></span><ArrowRight size={16} className="bottom-card-arrow" /></button></div>
           </section>}
 
-          {tab === 'focus' && <section className="standard-page focus-page"><div className="page-title-block"><div className="page-icon focus-page-icon"><Target size={20} /></div><div className="date-overline">UM PASSO DE CADA VEZ</div><h1>Foco agora</h1><p>Até três coisas. No seu ritmo, sem cobrança.</p></div><div className="focus-summary"><span><Focus size={16} /> {focusTasks.length ? `${focusTasks.length} ${focusTasks.length === 1 ? 'escolha' : 'escolhas'} para este momento` : 'Você decide quando começar'}</span><span>Seu foco pode mudar.</span></div><div className="focus-list">{focusTasks.map((task, index) => <div className="focus-item" key={task.id}><div className={`focus-item-number ${index === 0 ? 'current' : ''}`}>{index + 1}</div><div className="focus-item-content"><div className="focus-item-meta"><span>{task.category || 'Entrada'}</span>{task.due_at && <span><CalendarDays size={13} />{dateLabel(task.due_at)}</span>}{task.status === 'waiting' && <span className="task-waiting-pill">Aguardando retorno</span>}</div><h3><button className="focus-detail-link" onClick={() => openTask(task)}>{task.title}</button></h3>{task.notes && <p>{task.notes}</p>}<div className="focus-item-actions">{task.status === 'waiting' ? <button className="primary-button small" onClick={() => openTask(task)}>Ver cobrança <ArrowRight size={15} /></button> : <button className="primary-button small" onClick={() => updateTask(task, { status: 'doing' })}>{task.status === 'doing' ? 'Em andamento' : 'Começar'}<ArrowRight size={15} /></button>}{task.status !== 'waiting' && <button className="quiet-button small-quiet" onClick={() => updateTask(task, { status: 'paused' })}>Deixar para depois</button>}</div></div><button className="icon-button more-task" title="Mudar prioridade" onClick={() => promote(task)}><ArrowUpRight size={17} /></button></div>)}{focusTasks.length === 0 && <div className="empty-state focus-empty"><div className="empty-icon"><Sun size={21} /></div><h3>Nada precisa acontecer agora.</h3><p>Esse espaço está livre. Quando quiser, encontre algo na sua fila.</p><button className="primary-button" onClick={() => setTab('queue')}>Abrir minha fila <ArrowRight size={15} /></button></div>}</div><div className="focus-reassurance"><span className="reassurance-sparkle"><Sparkles size={15} /></span><span><strong>Você não precisa fazer tudo.</strong> Escolher um próximo passo já conta.</span></div></section>}
+          {tab === 'focus' && <section className="standard-page focus-page"><div className="page-title-block"><div className="page-icon focus-page-icon"><Target size={20} /></div><div className="date-overline">UM PASSO DE CADA VEZ</div><h1>Foco agora</h1><p>Até três escolhas suas para hoje. No seu ritmo, sem cobrança.</p></div><div className="focus-summary"><span><Focus size={16} /> {focusTasks.length ? `${focusTasks.length} ${focusTasks.length === 1 ? 'escolha' : 'escolhas'} para este momento` : 'Você decide quando começar'}</span><span>Seu foco pode mudar.</span></div><div className="focus-list">{focusTasks.map((task, index) => <div className="focus-item" key={task.id}><div className={`focus-item-number ${index === 0 ? 'current' : ''}`}>{index + 1}</div><div className="focus-item-content"><div className="focus-item-meta"><span>{task.category || 'Entrada'}</span>{task.due_at && <span><CalendarDays size={13} />{dateLabel(task.due_at)}</span>}{task.estimated_minutes && <span><Clock3 size={13} />{task.estimated_minutes} min</span>}{task.status === 'waiting' && <span className="task-waiting-pill">Aguardando retorno</span>}</div><h3><button className="focus-detail-link" onClick={() => openTask(task)}>{task.title}</button></h3>{task.notes && <p>{task.notes}</p>}{task.steps?.length > 0 && <div className="focus-step-preview">{task.steps.filter((step) => !step.done).length} passos restantes</div>}<div className="focus-item-actions">{task.status === 'waiting' ? <button className="primary-button small" onClick={() => openTask(task)}>Ver cobrança <ArrowRight size={15} /></button> : <button className="primary-button small" onClick={() => updateTask(task, { status: 'doing' })}>{task.status === 'doing' ? 'Em andamento' : 'Começar'}<ArrowRight size={15} /></button>}{task.status !== 'waiting' && <button className="quiet-button small-quiet" onClick={() => updateTask(task, { status: 'paused' })}>Deixar para depois</button>}<button className="quiet-button small-quiet" onClick={() => toggleFocus(task)}>Tirar do foco</button></div></div><button className="icon-button more-task" title="Mudar prioridade" onClick={() => promote(task)}><ArrowUpRight size={17} /></button></div>)}{focusTasks.length === 0 && <div className="empty-state focus-empty"><div className="empty-icon"><Sun size={21} /></div><h3>Você escolhe o que entra aqui.</h3><p>Adicione até três atividades pela sua fila. Elas continuam guardadas mesmo quando saem do foco.</p><button className="primary-button" onClick={() => setTab('queue')}>Escolher atividades <ArrowRight size={15} /></button></div>}</div><div className="focus-reassurance"><span className="reassurance-sparkle"><Sparkles size={15} /></span><span><strong>Você não precisa fazer tudo.</strong> Escolher um próximo passo já conta.</span></div></section>}
 
-          {tab === 'queue' && <section className="standard-page queue-page"><div className="queue-heading"><div><div className="date-overline">SEU ESPAÇO, SEM PRESSA</div><h1>Minha fila</h1><p>Tudo o que você trouxe para cá, reunido em um só lugar.</p></div><button className="primary-button" onClick={() => { setTab('home'); setTimeout(() => captureRef.current?.focus(), 0) }}><Plus size={17} /> Nova atividade</button></div><div className="queue-tools"><div className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar na sua fila" aria-label="Buscar atividade" />{query && <button className="icon-button" onClick={() => setQuery('')}><X size={15} /></button>}</div><div className="filter-group" aria-label="Filtrar atividades"><Filter size={15} />{['Tudo', 'Caixa de entrada', 'Em andamento', 'Aguardando retorno', 'Pausadas', 'Concluídas', ...profile.categories].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? 'selected' : ''}`}>{item}</button>)}</div></div><div className="queue-count">{visibleTasks.length} {visibleTasks.length === 1 ? 'atividade' : 'atividades'}<span>·</span>organizadas do seu jeito</div><div className="queue-list">{visibleTasks.map((task) => <TaskRow key={task.id} task={task} categories={profile.categories} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} />)}{visibleTasks.length === 0 && <div className="empty-state queue-empty"><div className="empty-icon"><Inbox size={20} /></div><strong>{query ? 'Não encontrei essa atividade.' : 'Este espaço está vazio.'}</strong><span>{query ? 'Experimente buscar com outras palavras.' : 'Quando algo surgir, você pode guardar aqui.'}</span></div>}</div></section>}
+          {tab === 'queue' && <section className="standard-page queue-page">
+            <div className="queue-heading"><div><div className="date-overline">SEU ESPAÇO, SEM PRESSA</div><h1>Minha fila</h1><p>Tudo o que você trouxe para cá, reunido em um só lugar.</p></div><button className="primary-button" onClick={() => { setTab('home'); setTimeout(() => captureRef.current?.focus(), 0) }}><Plus size={17} /> Nova atividade</button></div>
+            <div className="queue-tools"><div className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar na sua fila" aria-label="Buscar atividade" />{query && <button className="icon-button" onClick={() => setQuery('')}><X size={15} /></button>}</div>
+              <div className="filter-group" aria-label="Filtrar atividades"><Filter size={15} />{['Tudo', 'Caixa de entrada', 'Em andamento', 'Aguardando retorno', 'Pausadas', 'Concluídas', 'Com lembrete', 'Sem prazo', ...profile.categories, ...new Set(tasks.flatMap((task) => task.tags || []).map((tag) => `Etiqueta:${tag}`))].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? 'selected' : ''}`}>{item.startsWith('Etiqueta:') ? `#${item.slice(9)}` : item}</button>)}</div>
+              <div className="queue-view-controls"><label>Ordenar por<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="data">Data mais próxima</option><option value="prioridade">Prioridade</option><option value="tempo">Menor duração</option></select></label><div className="view-switch" aria-label="Visualização"><button className={queueView === 'lista' ? 'active' : ''} onClick={() => setQueueView('lista')}>Lista</button><button className={queueView === 'agenda' ? 'active' : ''} onClick={() => setQueueView('agenda')}><CalendarDays size={14} /> Agenda</button></div></div>
+            </div>
+            <div className="queue-count">{visibleTasks.length} {visibleTasks.length === 1 ? 'atividade' : 'atividades'}<span>·</span>organizadas do seu jeito</div>
+            {queueView === 'lista' ? <div className="queue-list">{visibleTasks.map((task) => <TaskRow key={task.id} task={task} categories={profile.categories} isFocused={task.focus_date === localDateString()} onToggleFocus={toggleFocus} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} />)}{visibleTasks.length === 0 && <div className="empty-state queue-empty"><div className="empty-icon"><Inbox size={20} /></div><strong>{query ? 'Não encontrei essa atividade.' : 'Este espaço está vazio.'}</strong><span>{query ? 'Experimente buscar com outras palavras.' : 'Quando algo surgir, você pode guardar aqui.'}</span></div>}</div> : <div className="agenda-list">{agendaGroups.map((group) => <section className="agenda-group" key={group.key}><div className="agenda-day-heading"><CalendarDays size={16} /><h2>{group.label}</h2><span>{group.items.length}</span></div>{group.items.map((task) => <TaskRow key={task.id} task={task} categories={profile.categories} isFocused={task.focus_date === localDateString()} onToggleFocus={toggleFocus} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} />)}</section>)}{agendaGroups.length === 0 && <div className="empty-state queue-empty"><div className="empty-icon"><CalendarDays size={20} /></div><strong>Nenhuma data nesta busca.</strong><span>Experimente limpar os filtros ou escolher a lista.</span></div>}</div>}
+          </section>}
 
           {tab === 'assistant' && <section className="standard-page assistant-page"><div className="assistant-heading"><div><div className="page-icon assistant-page-icon"><Sparkles size={19} /></div><div className="date-overline">UM ESPAÇO PARA PENSAR EM VOZ ALTA</div><h1>Assistente</h1><p>Organize as ideias conversando. Sem respostas certas.</p></div><button className="quiet-button"><Clock3 size={15} /> Últimos 7 dias <ChevronDown size={14} /></button></div><div className="chat-card"><div className="chat-welcome"><div className="assistant-orb"><Sparkles size={19} /></div><h2>Por onde começamos?</h2><p>Você pode me contar o que está pesando, pedir para guardar uma ideia ou descobrir seu próximo passo.</p><div className="suggestion-row"><button onClick={() => setChatDraft('O que eu faço primeiro?')}>O que eu faço primeiro?</button><button onClick={() => setChatDraft('Adiciona na fila: ')}>Guardar uma atividade</button><button onClick={() => setChatDraft('Estou com muita coisa na cabeça')}>Estou com muita coisa na cabeça</button></div></div><div className="chat-messages">{messages.map((message) => <div className={`message ${message.role}`} key={message.id}><div className="message-avatar">{message.role === 'assistant' ? <Sparkles size={15} /> : firstName.slice(0, 1).toUpperCase()}</div><div className="message-content"><span>{message.role === 'assistant' ? 'Seu assistente' : 'Você'}</span><p>{message.content}</p></div></div>)}<div ref={chatRef} /></div><form className="chat-input" onSubmit={replyToAssistant}><textarea value={chatDraft} onChange={(event) => setChatDraft(event.target.value)} placeholder="Escreva do seu jeito…" rows="1" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); replyToAssistant(event) } }} /><div className="chat-input-footer"><span>Seu espaço é privado e sem julgamentos.</span><button className="send-button" disabled={!chatDraft.trim() || busy} aria-label="Enviar mensagem">{busy ? <span className="sending-dot" /> : <Send size={16} />}</button></div></form></div><div className="assistant-note"><Sparkles size={14} /><span>Respostas simples por enquanto. A inteligência do assistente pode evoluir com você.</span></div></section>}
 
-          {tab === 'profile' && <section className="standard-page profile-page"><div className="date-overline">AJUSTE O ESPAÇO AO SEU JEITO</div><h1>Seu perfil</h1><p>Pequenas preferências para deixar o AGIRMENTE mais seu.</p><div className="profile-card"><div className="profile-card-heading"><div className="large-avatar">{(profileName || 'A').slice(0, 1).toUpperCase()}</div><div><strong>{profileName}</strong><span>{user?.email || 'Perfil local neste dispositivo'}</span></div><button className="quiet-button profile-edit-hint"><Settings2 size={15} /> Preferências</button></div><form onSubmit={saveName} className="profile-form"><label htmlFor="profile-name">Como gostaria de ser chamado?</label><div className="profile-input-row"><input id="profile-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength="60" /><button className="secondary-button">Salvar nome</button></div></form><div className="profile-divider" /><div className="profile-section-title"><div><strong>Suas categorias</strong><span>Use as palavras que fazem sentido para você.</span></div></div><div className="category-list">{profile.categories.map((category) => <span key={category} className="category-chip">{category}</span>)}</div><form className="category-add" onSubmit={updateCategories}><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Criar uma categoria" maxLength="32" /><button type="submit" disabled={!cleanText(newCategory)}><Plus size={15} /> Adicionar</button></form><div className="profile-divider" /><div className="profile-settings-row"><div><strong>Seu espaço de trabalho</strong><span>{supabaseReady ? 'Sincronização segura com sua conta Supabase' : 'Este navegador guarda seus dados localmente'}</span></div><span className={`connection-pill ${supabaseReady ? 'is-connected' : ''}`}><span />{supabaseReady ? 'Conectado' : 'Local'}</span></div>{supabaseReady && <button className="sign-out-button" onClick={() => supabase.auth.signOut()}><LogOut size={16} /> Sair da conta</button>}</div><div className="privacy-note"><CircleHelp size={16} /><span>Seu jeito de pensar não precisa caber em um padrão. Você pode reorganizar suas categorias quando quiser.</span></div></section>}
+          {tab === 'profile' && <section className="standard-page profile-page"><div className="date-overline">AJUSTE O ESPAÇO AO SEU JEITO</div><h1>Seu perfil</h1><p>Pequenas preferências para deixar o AGIRMENTE mais seu.</p><div className="profile-card"><div className="profile-card-heading"><div className="large-avatar">{(profileName || 'A').slice(0, 1).toUpperCase()}</div><div><strong>{profileName}</strong><span>{user?.email || 'Perfil local neste dispositivo'}</span></div><span className="quiet-button profile-edit-hint"><Settings2 size={15} /> Preferências</span></div><form onSubmit={saveName} className="profile-form"><label htmlFor="profile-name">Como gostaria de ser chamado?</label><div className="profile-input-row"><input id="profile-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength="60" /><button className="secondary-button">Salvar nome</button></div></form><div className="profile-divider" /><div className="profile-section-title"><div><strong>Suas categorias</strong><span>Use as palavras que fazem sentido para você.</span></div></div><div className="category-list">{profile.categories.map((category) => <span key={category} className="category-chip">{category}</span>)}</div><form className="category-add" onSubmit={updateCategories}><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Criar uma categoria" maxLength="32" /><button type="submit" disabled={!cleanText(newCategory)}><Plus size={15} /> Adicionar</button></form><div className="profile-divider" /><div className="profile-settings-row"><div><strong>Seu espaço de trabalho</strong><span>{supabaseReady ? 'Sincronização segura com sua conta Supabase' : 'Este navegador guarda seus dados localmente'}</span></div><span className={`connection-pill ${supabaseReady ? 'is-connected' : ''}`}><span />{supabaseReady ? 'Conectado' : 'Local'}</span></div>{supabaseReady && <button className="sign-out-button" onClick={() => supabase.auth.signOut()}><LogOut size={16} /> Sair da conta</button>}</div>
+            <section className="profile-card accessibility-card"><div className="profile-section-title"><div><strong>Preferências de acessibilidade</strong><span>Faça o espaço acompanhar o que funciona para você.</span></div></div><label className="preference-toggle"><span><strong>Contraste reforçado</strong><small>Realça textos, bordas e controles.</small></span><input type="checkbox" checked={Boolean(profile.settings?.highContrast)} onChange={(event) => updatePreference('highContrast', event.target.checked)} /></label><label className="preference-toggle"><span><strong>Reduzir animações</strong><small>Diminui movimentos e transições na interface.</small></span><input type="checkbox" checked={Boolean(profile.settings?.reduceMotion)} onChange={(event) => updatePreference('reduceMotion', event.target.checked)} /></label><div className="notification-preference"><div><strong>Lembretes neste navegador</strong><small>{notificationPermission === 'granted' ? 'Notificações de área de trabalho ativadas.' : notificationPermission === 'denied' ? 'Permissão negada pelo navegador; os avisos aparecem no app.' : 'Ative para receber avisos quando o app estiver aberto.'}</small></div><button className="secondary-button" onClick={enableNotifications}>{notificationPermission === 'granted' ? 'Ativadas' : 'Ativar'}</button></div></section>
+            <div className="privacy-note"><CircleHelp size={16} /><span>Seu jeito de pensar não precisa caber em um padrão. Você pode reorganizar suas categorias quando quiser.</span></div></section>}
         </>}
       </div>
       <footer className="app-footer"><span>AGIRMENTE</span><span>Seu jeito de pensar. Sua maneira de transformar.</span><button onClick={() => setTab('profile')}>Preferências de acessibilidade <ArrowRight size={13} /></button></footer>
     </main>
     <nav className="mobile-nav">{navigation.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={19} /><span>{label}</span></button>)}</nav>
-    {selectedTask && <TaskDetailModal key={selectedTask.id} task={selectedTask} categories={profile.categories} onClose={() => setSelectedTaskId(null)} onSave={updateTask} onDelete={deleteTask} />}
-    {toast && <div className="toast"><span className="toast-icon"><Check size={14} /></span>{toast}<button className="toast-close" onClick={() => setToast('')}><X size={14} /></button></div>}
+    {selectedTask && <TaskDetailModal key={selectedTask.id} task={selectedTask} categories={profile.categories} onClose={() => setSelectedTaskId(null)} onSave={updateTask} onDelete={deleteTask} onSkip={skipOccurrence} />}
+    {toast && <div className="toast"><span className="toast-icon"><Check size={14} /></span>{toast}{pendingDelete && <button className="toast-undo" onClick={undoDelete}>Desfazer</button>}{reminderTask && <><button className="toast-undo" onClick={() => snoozeReminder(10)}>10 min</button><button className="toast-undo" onClick={() => snoozeReminder(1440)}>Amanhã</button></>}<button className="toast-close" onClick={() => { setToast(''); setReminderTask(null) }}><X size={14} /></button></div>}
   </div>
 }
 

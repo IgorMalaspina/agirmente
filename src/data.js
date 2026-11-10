@@ -2,6 +2,7 @@ import { supabase, supabaseReady } from './supabase.js'
 
 const STORAGE_KEY = 'agirmente:v1'
 const chatKey = (userId) => `${STORAGE_KEY}:assistant:${userId || 'local'}`
+const defaultProfile = () => ({ name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'], settings: { reduceMotion: false, highContrast: false } })
 const now = new Date()
 const later = (days) => new Date(now.getTime() + days * 86400000).toISOString()
 
@@ -14,9 +15,9 @@ const starterTasks = [
 function getLocalState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY))
-    if (saved) return { tasks: saved.tasks ?? starterTasks, messages: (saved.messages ?? []).filter((m) => Date.now() - new Date(m.created_at).getTime() < 7 * 86400000), profile: saved.profile ?? { name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'] } }
+    if (saved) return { tasks: saved.tasks ?? starterTasks, messages: (saved.messages ?? []).filter((m) => Date.now() - new Date(m.created_at).getTime() < 7 * 86400000), profile: { ...defaultProfile(), ...(saved.profile || {}), settings: { ...defaultProfile().settings, ...(saved.profile?.settings || {}) } } }
   } catch {}
-  return { tasks: starterTasks, messages: [], profile: { name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'] } }
+  return { tasks: starterTasks, messages: [], profile: defaultProfile() }
 }
 
 let localState = getLocalState()
@@ -34,7 +35,12 @@ const mapTaskFromDatabase = (task) => ({
   status: statusFromDatabase[task.status] || 'inbox',
   priority: task.priority === 'urgente' || task.priority === 'alta' ? 1 : task.priority === 'baixa' ? 3 : 2,
   notes: task.description || '',
-  steps: task.next_step ? [task.next_step] : [],
+  steps: Array.isArray(task.steps) ? task.steps : task.next_step ? [{ id: `legacy-${task.id}`, title: task.next_step, done: false }] : [],
+  estimated_minutes: task.estimated_minutes || null,
+  focus_date: task.focus_date || null,
+  reminder_at: task.reminder_at || null,
+  reminded_at: task.reminded_at || null,
+  recurrence: task.recurrence || 'nenhuma',
   task_type: task.task_type || 'tarefa',
   assignee: task.assignee || '',
   tags: Array.isArray(task.tags) ? task.tags : [],
@@ -57,7 +63,13 @@ function mapTaskToDatabase(task, userId) {
     follow_up_at: task.follow_up_at || null,
     status: statusToDatabase[status] || 'entrada',
     priority: priorityToDatabase[task.priority] || 'media',
-    next_step: task.steps?.[0] || null,
+    next_step: task.steps?.find((step) => !step.done)?.title || null,
+    steps: Array.isArray(task.steps) ? task.steps : [],
+    estimated_minutes: task.estimated_minutes || null,
+    focus_date: task.focus_date || null,
+    reminder_at: task.reminder_at || null,
+    reminded_at: task.reminded_at || null,
+    recurrence: task.recurrence || 'nenhuma',
     due_at: task.due_at || null,
     started_at: status === 'doing' ? task.started_at || timestamp : task.started_at || null,
     paused_at: status === 'paused' ? task.paused_at || timestamp : null,
@@ -84,7 +96,7 @@ export async function loadWorkspace(userId) {
   const metadata = authData.user?.user_metadata || {}
   return {
     tasks: (rows || []).map((row) => mapTaskFromDatabase({ ...row, history: historyByTask[row.id] || [] })),
-    profile: { name: metadata.name || authData.user?.email?.split('@')[0] || '', categories: Array.isArray(metadata.categories) ? metadata.categories : ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'] },
+    profile: { ...defaultProfile(), name: metadata.name || authData.user?.email?.split('@')[0] || '', categories: Array.isArray(metadata.categories) ? metadata.categories : defaultProfile().categories, settings: { ...defaultProfile().settings, ...(metadata.settings || {}) } },
     messages: readMessages(userId),
     mode: 'cloud',
   }
@@ -141,9 +153,9 @@ export async function saveMessage(message, userId) {
 
 export async function saveProfile(profile) {
   if (supabaseReady) {
-    const { data, error } = await supabase.auth.updateUser({ data: { name: profile.name, categories: profile.categories } })
+    const { data, error } = await supabase.auth.updateUser({ data: { name: profile.name, categories: profile.categories, settings: profile.settings || defaultProfile().settings } })
     if (error) throw error
-    return { name: data.user.user_metadata.name || '', categories: data.user.user_metadata.categories || [] }
+    return { name: data.user.user_metadata.name || '', categories: data.user.user_metadata.categories || [], settings: { ...defaultProfile().settings, ...(data.user.user_metadata.settings || {}) } }
   }
   localState.profile = profile
   persist()
