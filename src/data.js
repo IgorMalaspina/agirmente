@@ -25,8 +25,8 @@ const readMessages = (userId) => {
   try { return (JSON.parse(localStorage.getItem(chatKey(userId))) ?? []).filter((message) => Date.now() - new Date(message.created_at).getTime() < 7 * 86400000) } catch { return [] }
 }
 
-const statusToDatabase = { inbox: 'entrada', next: 'proxima_acao', doing: 'em_andamento', paused: 'pausada', done: 'concluida' }
-const statusFromDatabase = { entrada: 'inbox', proxima_acao: 'next', em_andamento: 'doing', aguardando_alguem: 'paused', pausada: 'paused', concluida: 'done' }
+const statusToDatabase = { inbox: 'entrada', next: 'proxima_acao', doing: 'em_andamento', waiting: 'aguardando_alguem', paused: 'pausada', done: 'concluida' }
+const statusFromDatabase = { entrada: 'inbox', proxima_acao: 'next', em_andamento: 'doing', aguardando_alguem: 'waiting', pausada: 'paused', concluida: 'done' }
 const priorityToDatabase = { 1: 'alta', 2: 'media', 3: 'baixa' }
 const mapTaskFromDatabase = (task) => ({
   ...task,
@@ -35,6 +35,11 @@ const mapTaskFromDatabase = (task) => ({
   priority: task.priority === 'urgente' || task.priority === 'alta' ? 1 : task.priority === 'baixa' ? 3 : 2,
   notes: task.description || '',
   steps: task.next_step ? [task.next_step] : [],
+  task_type: task.task_type || 'tarefa',
+  assignee: task.assignee || '',
+  tags: Array.isArray(task.tags) ? task.tags : [],
+  follow_up_at: task.follow_up_at || null,
+  history: task.history || [],
 })
 
 function mapTaskToDatabase(task, userId) {
@@ -46,6 +51,10 @@ function mapTaskToDatabase(task, userId) {
     title: task.title,
     description: task.notes || null,
     category: task.category || 'Entrada',
+    task_type: task.task_type || 'tarefa',
+    assignee: task.assignee || null,
+    tags: Array.isArray(task.tags) ? task.tags : [],
+    follow_up_at: task.follow_up_at || null,
     status: statusToDatabase[status] || 'entrada',
     priority: priorityToDatabase[task.priority] || 'media',
     next_step: task.steps?.[0] || null,
@@ -61,32 +70,55 @@ function mapTaskToDatabase(task, userId) {
 
 export async function loadWorkspace(userId) {
   if (!supabaseReady) return { ...localState, mode: 'local' }
-  const [{ data: rows, error }, { data: authData, error: authError }] = await Promise.all([
+  const [{ data: rows, error }, { data: eventRows, error: eventError }, { data: authData, error: authError }] = await Promise.all([
     supabase.from('tasks').select('*').eq('user_id', userId).order('position', { ascending: true }).order('created_at', { ascending: false }),
+    supabase.from('task_events').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.auth.getUser(),
   ])
-  if (error || authError) throw error || authError
+  if (error || eventError || authError) throw error || eventError || authError
+  const historyByTask = (eventRows || []).reduce((history, event) => {
+    history[event.task_id] ||= []
+    history[event.task_id].push(event)
+    return history
+  }, {})
   const metadata = authData.user?.user_metadata || {}
   return {
-    tasks: (rows || []).map(mapTaskFromDatabase),
+    tasks: (rows || []).map((row) => mapTaskFromDatabase({ ...row, history: historyByTask[row.id] || [] })),
     profile: { name: metadata.name || authData.user?.email?.split('@')[0] || '', categories: Array.isArray(metadata.categories) ? metadata.categories : ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'] },
     messages: readMessages(userId),
     mode: 'cloud',
   }
 }
 
-export async function saveTask(task, userId) {
+export async function saveTask(task, userId, activityEvent = null) {
   const complete = { ...task, updated_at: new Date().toISOString() }
   if (supabaseReady) {
     const { data, error } = await supabase.from('tasks').upsert(mapTaskToDatabase(complete, userId)).select().single()
     if (error) throw error
-    return mapTaskFromDatabase(data)
+    let history = task.history || []
+    if (activityEvent) {
+      const { data: event, error: eventError } = await supabase.from('task_events').insert({
+        task_id: complete.id,
+        user_id: userId,
+        event_type: activityEvent.event_type || 'atualizada',
+        note: activityEvent.note || null,
+        details: activityEvent.details || {},
+      }).select().single()
+      if (eventError) throw eventError
+      history = [event, ...history]
+    }
+    return mapTaskFromDatabase({ ...data, history })
   }
   const index = localState.tasks.findIndex((item) => item.id === complete.id)
-  localState.tasks = index < 0 ? [complete, ...localState.tasks] : localState.tasks.map((item) => item.id === complete.id ? complete : item)
+  let history = complete.history || []
+  if (activityEvent) history = [{ id: makeLocalId(), ...activityEvent, created_at: new Date().toISOString() }, ...history]
+  const stored = { ...complete, history }
+  localState.tasks = index < 0 ? [stored, ...localState.tasks] : localState.tasks.map((item) => item.id === complete.id ? stored : item)
   persist()
-  return complete
+  return stored
 }
+
+const makeLocalId = () => globalThis.crypto?.randomUUID?.() ?? `event-${Date.now()}-${Math.random().toString(16).slice(2)}`
 
 export async function removeTask(id) {
   if (supabaseReady) {
