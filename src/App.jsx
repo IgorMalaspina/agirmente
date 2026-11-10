@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, supabaseReady } from './supabase.js'
 import { loadWorkspace, removeTask, saveMessage, saveProfile, saveTask } from './data.js'
+import brandIcon from './assets/agirmente-app-icon.png'
+import brandLogo from './assets/agirmente-horizontal-logo.png'
 import {
   ArrowRight, ArrowUpRight, Bell, CalendarDays, Check, CheckCheck, ChevronDown,
   CircleDollarSign, CircleHelp, Clock3, Command, Compass, Filter, Focus, History, Inbox, Lightbulb,
@@ -31,11 +33,7 @@ const greeting = () => {
 }
 
 function BrandMark() {
-  return <span className="brand-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none">
-    <path d="M7 20.5c1.5-6.3 5.6-11 10.5-11 2.6 0 4.4 1.4 4.4 3.5 0 4-7.2 6.6-11.7 5.1-1.4-.5-1.8-1.6-.9-2.8 1.2-1.7 4.1-2.8 7.5-2.8" />
-    <path d="M18.6 12.6h5v5" />
-    <circle cx="7" cy="21" r="1.5" /><circle cx="10" cy="8" r="1.2" />
-  </svg></span>
+  return <img className="brand-symbol" src={brandIcon} alt="" aria-hidden="true" />
 }
 
 const inputDate = (value) => value ? new Date(value).toISOString().slice(0, 10) : ''
@@ -61,7 +59,7 @@ function AuthGate() {
     setBusy(false)
     setNotice(result.error?.message ?? (isSignup ? 'Conta criada. Confira seu e-mail para confirmar o acesso.' : 'Acesso realizado.'))
   }
-  return <main className="auth-screen"><div className="auth-brand"><BrandMark /><span>agirmente</span></div><section className="auth-card"><div className="eyebrow"><Sparkles size={15} /> UM LUGAR PARA COMEÇAR</div><h1>Seus pensamentos<br />podem respirar.</h1><p>Entre para continuar organizando as coisas do seu jeito.</p><form onSubmit={submit} className="auth-form"><label>E-mail<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required placeholder="voce@email.com" autoComplete="email" /></label><label>Senha<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength="6" placeholder="Pelo menos 6 caracteres" autoComplete={isSignup ? 'new-password' : 'current-password'} /></label><button className="primary-button full" disabled={busy}>{busy ? 'Só um instante…' : isSignup ? 'Criar minha conta' : 'Entrar'}<ArrowRight size={17} /></button></form>{notice && <div className="notice">{notice}</div>}<button className="text-button auth-toggle" onClick={() => { setIsSignup(!isSignup); setNotice('') }}>{isSignup ? 'Já tenho uma conta' : 'Ainda não tenho conta'}</button><div className="auth-note">Seus dados ficam protegidos e pertencem a você.</div></section><div className="auth-footer">Seu jeito de pensar. Sua maneira de transformar.</div></main>
+  return <main className="auth-screen"><div className="auth-brand"><img src={brandLogo} alt="AGIRMENTE — Seu jeito de pensar. Sua maneira de transformar." /></div><section className="auth-card"><div className="eyebrow"><Sparkles size={15} /> UM LUGAR PARA COMEÇAR</div><h1>Seus pensamentos<br />podem respirar.</h1><p>Entre para continuar organizando as coisas do seu jeito.</p><form onSubmit={submit} className="auth-form"><label>E-mail<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required placeholder="voce@email.com" autoComplete="email" /></label><label>Senha<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength="6" placeholder="Pelo menos 6 caracteres" autoComplete={isSignup ? 'new-password' : 'current-password'} /></label><button className="primary-button full" disabled={busy}>{busy ? 'Só um instante…' : isSignup ? 'Criar minha conta' : 'Entrar'}<ArrowRight size={17} /></button></form>{notice && <div className="notice">{notice}</div>}<button className="text-button auth-toggle" onClick={() => { setIsSignup(!isSignup); setNotice('') }}>{isSignup ? 'Já tenho uma conta' : 'Ainda não tenho conta'}</button><div className="auth-note">Seus dados ficam protegidos e pertencem a você.</div></section><div className="auth-footer">Seu jeito de pensar. Sua maneira de transformar.</div></main>
 }
 
 function TaskRow({ task, onStatus, onDelete, onPrioritize, onCategory, onOpen, categories = [], compact = false }) {
@@ -287,6 +285,10 @@ function App() {
   const currentNavigation = navigation.find((item) => item.id === tab)
   const queuedCount = activeTasks.length
   const firstName = (profile.name || profileName || 'Alex').split(' ')[0]
+  const completedCount = tasks.filter((task) => task.status === 'done').length
+  const inboxCount = tasks.filter((task) => task.status === 'inbox').length
+  const doingCount = tasks.filter((task) => task.status === 'doing').length
+  const completionRate = tasks.length ? Math.round((completedCount / tasks.length) * 100) : 0
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -303,10 +305,24 @@ function App() {
       <div className="page-content">
         {loadingWorkspace ? <div className="page-loading">Organizando seu espaço…</div> : <>
           {tab === 'home' && <section className="home-page">
-            <div className="home-heading"><div><div className="date-overline">{new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</div><h1>{greeting()}, {firstName}<span className="heading-period">.</span></h1><p>Vamos começar pelo que faz sentido para você.</p></div><button className="quiet-button" onClick={() => setTab('focus')}><Compass size={16} /> Encontrar meu foco <ArrowRight size={15} /></button></div>
+            <div className="home-heading"><div className="home-greeting"><span className="greeting-icon"><Sun size={25} /></span><div><div className="date-overline">{new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</div><h1>{greeting()}, {firstName}<span className="heading-period">.</span></h1><p>Vamos organizar seu dia do seu jeito.</p></div></div><button className="quiet-button" onClick={() => setTab('focus')}><Compass size={16} /> Encontrar meu foco <ArrowRight size={15} /></button></div>
             <form className="capture-card" onSubmit={handleCapture}><div className="capture-top"><span className="capture-glyph"><Sparkles size={18} /></span><div><strong>Tire da cabeça, coloque aqui.</strong><span>Uma ideia, uma tarefa, qualquer coisa.</span></div></div><div className="capture-input-row"><input ref={captureRef} value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="O que está passando pela sua cabeça?" aria-label="Capturar uma atividade"/><button type="button" className="voice-button" title="Capturar por voz" onClick={toggleVoice}><Mic size={17} /></button><button type="submit" className="capture-submit" disabled={!capture.trim()}>Guardar <ArrowRight size={15} /></button></div><div className="capture-footer"><span><Command size={12} /> Captura rápida</span><span>Sem pressão para organizar agora</span></div></form>
-            <div className="section-heading-row"><div><div className="section-kicker">PARA ESTE MOMENTO</div><h2>Seu foco agora <span className="soft-count">{focusTasks.length}/3</span></h2></div><button className="text-link" onClick={() => setTab('focus')}>Ver foco <ArrowRight size={15} /></button></div>
-            <div className="home-focus-list">{focusTasks.length ? focusTasks.slice(0, 2).map((task, index) => <div className="focus-preview" key={task.id}><span className={`focus-number ${index === 0 ? 'current' : ''}`}>{String(index + 1).padStart(2, '0')}</span><TaskRow task={task} categories={profile.categories} compact onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} /></div>) : <div className="empty-state inline-empty"><div className="empty-icon"><CheckCheck size={20} /></div><strong>Espaço para respirar.</strong><span>Nenhuma atividade precisa do seu foco agora.</span></div>}</div>
+            <div className="overview-cards" aria-label="Resumo das atividades">
+              <article className="overview-card overview-card-green"><span className="overview-icon"><CheckCheck size={19} /></span><div><strong>{queuedCount}</strong><span>Atividades na fila</span></div><span className="overview-caption">guardadas com você</span></article>
+              <article className="overview-card overview-card-blue"><span className="overview-icon"><Target size={19} /></span><div><strong>{focusTasks.length}<small> / 3</small></strong><span>No seu foco</span></div><span className="overview-caption">você escolhe o ritmo</span></article>
+              <article className="overview-card overview-card-lime"><span className="overview-icon"><Check size={19} /></span><div><strong>{completedCount}</strong><span>Concluídas</span></div><span className="overview-caption">cada passo conta</span></article>
+            </div>
+            <div className="home-dashboard-grid">
+              <section className="home-tasks-panel">
+                <div className="home-panel-heading"><div><div className="section-kicker">PARA ESTE MOMENTO</div><h2>Próximas tarefas <span className="soft-count">{focusTasks.length}/3</span></h2></div><button className="text-link" onClick={() => setTab('focus')}>Ver todas <ArrowRight size={15} /></button></div>
+                <div className="home-focus-list">{focusTasks.length ? focusTasks.slice(0, 3).map((task, index) => <div className="focus-preview" key={task.id}><span className={`focus-number ${index === 0 ? 'current' : ''}`}>{String(index + 1).padStart(2, '0')}</span><TaskRow task={task} categories={profile.categories} compact onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} /></div>) : <div className="empty-state inline-empty"><div className="empty-icon"><CheckCheck size={20} /></div><strong>Espaço para respirar.</strong><span>Nenhuma atividade precisa do seu foco agora.</span></div>}</div>
+              </section>
+              <section className="home-progress-panel">
+                <div className="home-panel-heading"><div><div className="section-kicker">SEM PRESSA</div><h2>Seu progresso</h2></div><span className="progress-period">Agora</span></div>
+                <div className="progress-summary"><div className="progress-ring" style={{ '--progress': `${completionRate}%` }}><div><strong>{completionRate}%</strong><span>concluído</span></div></div><div className="progress-legend"><div><i className="legend-complete" /><span>Concluídas</span><strong>{completedCount}</strong></div><div><i className="legend-active" /><span>Em andamento</span><strong>{doingCount}</strong></div><div><i className="legend-inbox" /><span>Na entrada</span><strong>{inboxCount}</strong></div></div></div>
+                <div className="progress-message"><span className="progress-message-mark"><Sparkles size={15} /></span><span>Progresso também é descobrir o seu próximo passo.</span></div>
+              </section>
+            </div>
             <div className="bottom-cards"><button className="bottom-card" onClick={() => { setTab('queue'); setFilter('Caixa de entrada') }}><span className="bottom-card-icon inbox-icon"><Inbox size={18} /></span><span className="bottom-card-copy"><strong>Caixa de entrada</strong><small>Ideias esperando um lugar</small></span><span className="bottom-card-count">{tasks.filter((task) => task.status === 'inbox').length}</span><ArrowRight size={16} className="bottom-card-arrow" /></button><button className="bottom-card" onClick={() => setTab('assistant')}><span className="bottom-card-icon assistant-icon"><Sparkles size={18} /></span><span className="bottom-card-copy"><strong>Precisa de clareza?</strong><small>Converse com seu assistente</small></span><ArrowRight size={16} className="bottom-card-arrow" /></button></div>
           </section>}
 
