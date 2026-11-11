@@ -6,15 +6,18 @@ MVP web responsivo para capturar pensamentos, organizar atividades e escolher um
 
 ## O que já funciona
 
-- Cinco áreas de navegação: Início, Foco agora, Minha fila, Assistente e Perfil.
+- Seis áreas de navegação: Início, Foco agora, Minha fila, Saúde, Assistente e Perfil.
 - Captura rápida por texto; captura por voz nos navegadores que disponibilizam reconhecimento de fala.
 - Persistência local no navegador quando o Supabase ainda não está configurado.
-- Fila com busca, filtros por estado/categoria/etiqueta e ordenação por data, prioridade ou duração; visualização em lista e agenda.
+- Fila com busca, filtros por estado/categoria/etiqueta e ordenação por data, prioridade ou duração; visualização em lista, agenda e quadro Kanban.
+- Backlog separado para capturas que ainda precisam de contexto e seletor de Foco agora sem sair da aba.
+- Etiquetas coloridas por atividade; cobranças podem ser registradas, adiadas para uma data de retorno ou concluídas e arquivadas.
 - Foco do dia escolhido manualmente, com até três atividades.
 - Atividades com checklist de várias etapas, estimativa opcional, recorrência flexível, lembretes, notas e histórico.
-- Preferências para contraste reforçado e redução de animações; exclusões podem ser desfeitas por oito segundos.
+- Preferências para tema claro, escuro verde ou automático, contraste reforçado e redução de animações; exclusões podem ser desfeitas por oito segundos.
+- Área Saúde para configurar meta e capacidade da garrafa, registrar hidratação, acompanhar um medidor visual e ativar lembretes enquanto o app estiver aberto.
 - Categorias pessoais e perfil editável.
-- Assistente sem API paga: captura atividades e responde a comandos básicos de conclusão, pausa e escolha de foco.
+- Assistente sem API paga: sugere categoria, prioridade, prazo relativo, duração e etiquetas durante a captura; recomenda prioridades e responde a comandos locais de conclusão, pausa, detalhes e foco.
 - Histórico do assistente limitado aos últimos sete dias.
 - Login por e-mail e senha quando as variáveis Supabase são informadas.
 
@@ -28,7 +31,7 @@ Sem configuração Supabase, o aplicativo abre em modo local e informa que os da
 
 ## Supabase configurado
 
-O repositório está ligado ao projeto Supabase `organizador-pessoal`. A extensão [`supabase/schema.sql`](supabase/schema.sql) acrescenta categoria, detalhes de cobrança, etapas, foco do dia, estimativa, lembretes e recorrência à tabela `tasks`; a migração mantém as políticas RLS por `auth.uid()` que já protegem as tarefas.
+O repositório está ligado ao projeto Supabase `organizador-pessoal`. A extensão [`supabase/schema.sql`](supabase/schema.sql) acrescenta categoria, detalhes de cobrança, etapas, foco do dia, estimativa, lembretes, recorrência e cores de etiqueta à tabela `tasks`; também cria `water_logs` com RLS e acesso limitado à própria conta.
 
 O endereço e a chave **publishable** ficam em `.env.local`, que é ignorado pelo Git. Nunca coloque uma chave `service_role` ou `secret` no cliente. O login é feito pelo Supabase Auth com e-mail e senha. Nome, categorias e preferências visuais são salvos no metadado editável do próprio usuário e não são usados em regras de autorização. O histórico do assistente fica neste navegador por até sete dias; atividades e perfil sincronizam pela conta.
 
