@@ -2,7 +2,7 @@ import { supabase, supabaseReady } from './supabase.js'
 
 const STORAGE_KEY = 'agirmente:v1'
 const chatKey = (userId) => `${STORAGE_KEY}:assistant:${userId || 'local'}`
-const defaultProfile = () => ({ name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'], settings: { reduceMotion: false, highContrast: false, appearance: 'system', water_goal_ml: 2000, bottle_ml: 750, water_reminders: false, water_reminder_minutes: 120 } })
+const defaultProfile = () => ({ name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'], settings: { reduceMotion: false, highContrast: false, appearance: 'system', water_goal_ml: 2000, bottle_ml: 750, water_reminders: false, water_reminder_minutes: 120, tag_catalog: [] } })
 const now = new Date()
 const later = (days) => new Date(now.getTime() + days * 86400000).toISOString()
 
