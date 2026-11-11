@@ -13,7 +13,17 @@ alter table public.tasks
   add column if not exists task_type text not null default 'tarefa',
   add column if not exists assignee text,
   add column if not exists tags text[] not null default array[]::text[],
+  add column if not exists tag_colors jsonb not null default '{}'::jsonb,
   add column if not exists follow_up_at timestamptz;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'tasks_tag_colors_object_check') then
+    alter table public.tasks add constraint tasks_tag_colors_object_check
+      check (jsonb_typeof(tag_colors) = 'object');
+  end if;
+end;
+$$;
 
 do $$
 begin
@@ -70,3 +80,33 @@ create index if not exists tasks_user_focus_date_idx
 create index if not exists tasks_user_reminder_at_idx
   on public.tasks (user_id, reminder_at)
   where reminder_at is not null;
+
+-- Registro de hidratação com leitura e inserção limitadas ao usuário autenticado.
+create table if not exists public.water_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  amount_ml integer not null check (amount_ml between 1 and 5000),
+  drank_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+alter table public.water_logs enable row level security;
+grant select, insert, delete on public.water_logs to authenticated;
+
+drop policy if exists "Users read their own water logs" on public.water_logs;
+create policy "Users read their own water logs"
+  on public.water_logs for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "Users add their own water logs" on public.water_logs;
+create policy "Users add their own water logs"
+  on public.water_logs for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users delete their own water logs" on public.water_logs;
+create policy "Users delete their own water logs"
+  on public.water_logs for delete to authenticated
+  using ((select auth.uid()) = user_id);
+
+create index if not exists water_logs_user_drank_at_idx
+  on public.water_logs (user_id, drank_at desc);
