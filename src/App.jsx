@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, supabaseReady } from './supabase.js'
-import { loadWorkspace, removeTask, saveMessage, saveProfile, saveTask } from './data.js'
+import { loadWorkspace, removeTask, saveMessage, saveProfile, saveTask, saveWaterLog } from './data.js'
 import brandIcon from './assets/agirmente-app-icon.png'
 import brandLogo from './assets/agirmente-horizontal-logo.png'
 import {
   ArrowRight, ArrowUpRight, Bell, BellRing, CalendarDays, Check, CheckCheck, ChevronDown,
-  CircleDollarSign, CircleHelp, Clock3, Command, Compass, Filter, Focus, History, Inbox, Lightbulb,
+  CircleDollarSign, CircleHelp, Clock3, Command, Compass, Filter, Focus, History, Home, Inbox, Lightbulb,
   ListChecks, ListTodo, LogOut, MessageCircle, Mic, MoreHorizontal, Plus, Repeat2, Save, Search, Send, Settings2, Sparkles,
-  Sun, Tag, Target, Trash2, UserRound, X,
+  Sun, Tag, Target, Trash2, UserRound, X, Droplets, GlassWater, Columns3, List, CalendarRange,
 } from 'lucide-react'
 
 const navigation = [
-  { id: 'home', label: 'Início', icon: Sun },
+  { id: 'home', label: 'Início', icon: Home },
   { id: 'focus', label: 'Foco agora', icon: Target },
   { id: 'queue', label: 'Minha fila', icon: ListTodo },
+  { id: 'health', label: 'Saúde', icon: Droplets },
   { id: 'assistant', label: 'Assistente', icon: MessageCircle },
   { id: 'profile', label: 'Perfil', icon: UserRound },
 ]
@@ -30,6 +31,23 @@ const dateLabel = (value) => {
 const greeting = () => {
   const hour = new Date().getHours()
   return hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'
+}
+function suggestTaskDetails(raw, categories = []) {
+  const text = raw.toLocaleLowerCase('pt-BR')
+  const categoryHints = [
+    ['Saúde', /sa[uú]de|m[eé]dic|consulta|rem[eé]dio|exame|[aá]gua|terapia|dentista/],
+    ['Trabalho', /trabalho|cliente|reuni[aã]o|projeto|relat[oó]rio|equipe|empresa|cobrar|or[cç]amento/],
+    ['Pessoal', /casa|fam[ií]lia|mercado|pessoal|organizar|comprar|pagar/],
+    ['Ideias', /ideia|pensar|pesquisar|planejar|talvez|projeto futuro/],
+  ]
+  const detected = categoryHints.find(([, pattern]) => pattern.test(text))?.[0]
+  const category = detected && categories.includes(detected) ? detected : 'Entrada'
+  const priority = /urgente|hoje|atrasad|prazo|até amanhã|o quanto antes/.test(text) ? 1 : /quando puder|sem pressa|algum dia|sem urgência/.test(text) ? 3 : 2
+  const minutes = Number(text.match(/\b(\d{1,3})\s*(?:min|minuto|minutos)\b/)?.[1]) || (text.length > 110 ? 30 : text.length > 55 ? 20 : null)
+  const due = /\bhoje\b/.test(text) ? dateFromInput(localDateString()) : /\bamanh[ãa]\b/.test(text) ? dateFromInput(localDateString(new Date(Date.now()+86400000))) : null
+  const words = text.match(/#([\p{L}\p{N}_-]+)/gu) || []
+  const tags = words.map((word) => word.slice(1))
+  return { category, priority, estimated_minutes: minutes, due_at: due, tags, tag_colors: {} }
 }
 
 function BrandMark() {
@@ -58,6 +76,7 @@ const eventLabels = {
   criada: 'Atividade criada', iniciada: 'Atividade iniciada', pausada: 'Atividade pausada',
   retomada: 'Atividade retomada', aguardando_alguem: 'Aguardando retorno', cobranca_feita: 'Cobrança registrada',
   concluida: 'Atividade concluída', reaberta: 'Atividade reaberta', atualizada: 'Detalhes atualizados',
+  cobranca_adiada: 'Cobrança agendada para depois',
 }
 
 function AuthGate() {
@@ -83,16 +102,16 @@ function TaskRow({ task, onStatus, onDelete, onPrioritize, onCategory, onOpen, o
   const isCharge = task.task_type === 'cobranca'
   return <article className={`task-row ${compact ? 'compact' : ''} ${done ? 'is-done' : ''}`}>
     <button className={`task-check ${done ? 'checked' : ''} ${isCharge ? 'task-check-charge' : ''}`} aria-label={isCharge ? 'Abrir detalhes da cobrança' : done ? 'Reabrir atividade' : 'Concluir atividade'} onClick={() => isCharge ? onOpen?.(task) : onStatus(task, { status: done ? 'next' : 'done' })}>{done ? <Check size={14} /> : isCharge ? <CircleDollarSign size={13} /> : null}</button>
-    <div className="task-main"><button className="task-open-button" onClick={() => onOpen?.(task)}><span className="task-title-line"><span className="task-title">{task.title}</span>{task.priority === 1 && <span className="priority-dot" title="Prioridade alta" />}</span><ArrowUpRight size={14} className="task-open-icon" aria-hidden="true" /></button><div className="task-meta"><select className="category-select" aria-label={`Categoria: ${task.title}`} value={task.category || 'Entrada'} onChange={(event) => onCategory?.(task, event.target.value)}><option value="Entrada">Entrada</option>{categories.map((category) => <option value={category} key={category}>{category}</option>)}</select>{task.task_type === 'cobranca' && <span className="task-kind-pill"><CircleDollarSign size={12} /> Cobrança</span>}{task.status === 'waiting' && <span className="task-waiting-pill">Aguardando retorno</span>}{task.due_at && <><span className="meta-separator">·</span><span className={new Date(task.due_at).toDateString() === new Date().toDateString() ? 'due-today' : ''}><CalendarDays size={12} />{dateLabel(dateFromInput(inputDate(task.due_at)))}</span></>}{task.estimated_minutes && <span><Clock3 size={12} />{task.estimated_minutes} min</span>}{task.steps?.length > 0 && <span><ListChecks size={12} />{task.steps.filter((step) => step.done).length}/{task.steps.length}</span>}{task.status === 'waiting' && task.follow_up_at && <><span className="meta-separator">·</span><span><History size={12} />Cobrar {dateLabel(task.follow_up_at)}</span></>}</div></div>
-    <div className="task-actions">{task.status !== 'done' && <button className={`mini-action ${isFocused ? 'focus-selected-action' : ''}`} onClick={() => onToggleFocus?.(task)}>{isFocused ? 'No foco' : 'Adicionar ao foco'}</button>}{task.status === 'paused' ? <button className="mini-action" onClick={() => onStatus(task, { status: 'next' })}>Retomar</button> : task.status !== 'done' && <button className="mini-action" onClick={() => onStatus(task, { status: 'paused' })}>Pausar</button>}<button className="icon-button subtle" title="Priorizar" onClick={() => onPrioritize(task)}><ArrowUpRight size={16} /></button><button className="icon-button subtle delete-action" title="Excluir" onClick={() => onDelete(task)}><Trash2 size={15} /></button></div>
+    <div className="task-main"><button className="task-open-button" aria-label={`Abrir detalhes: ${task.title}`} onClick={() => onOpen?.(task)}><span className="task-title-line"><span className="task-title">{task.title}</span>{task.priority === 1 && <span className="priority-dot" title="Prioridade alta" />}</span><span className="task-open-label">Abrir detalhes <ArrowUpRight size={13}/></span></button><div className="task-meta"><select className="category-select" aria-label={`Categoria: ${task.title}`} value={task.category || 'Entrada'} onChange={(event) => onCategory?.(task, event.target.value)}><option value="Entrada">Entrada</option>{categories.map((category) => <option value={category} key={category}>{category}</option>)}</select>{task.task_type === 'cobranca' && <span className="task-kind-pill"><CircleDollarSign size={12} /> Cobrança</span>}{task.status === 'waiting' && <span className="task-waiting-pill">Aguardando retorno</span>}{task.due_at && <><span className="meta-separator">·</span><span className={new Date(task.due_at).toDateString() === new Date().toDateString() ? 'due-today' : ''}><CalendarDays size={12} />{dateLabel(dateFromInput(inputDate(task.due_at)))}</span></>}{task.estimated_minutes && <span><Clock3 size={12} />{task.estimated_minutes} min</span>}{task.steps?.length > 0 && <span><ListChecks size={12} />{task.steps.filter((step) => step.done).length}/{task.steps.length}</span>}{task.status === 'waiting' && task.follow_up_at && <><span className="meta-separator">·</span><span><History size={12} />Cobrar {dateLabel(task.follow_up_at)}</span></>}</div>{task.tags?.length > 0 && <div className="task-tags" aria-label="Etiquetas">{task.tags.map((tag) => { const color = task.tag_colors?.[tag] || '#16985d'; return <span className="task-tag" key={tag} style={{ '--tag-color': color }}>{tag}</span> })}</div>}</div>
+    <div className="task-actions"><button className={`focus-action ${isFocused ? 'is-selected' : ''}`} aria-label={`${isFocused ? 'Remover de' : 'Adicionar ao'} Foco agora: ${task.title}`} onClick={() => onToggleFocus?.(task)}><Target size={14} /><span>{isFocused ? 'No foco' : 'Colocar no foco'}</span></button>{task.status === 'paused' ? <button className="mini-action" onClick={() => onStatus(task, { status: 'next' })}>Retomar</button> : task.status !== 'done' && <button className="mini-action" onClick={() => onStatus(task, { status: 'paused' })}>Pausar</button>}<button className="icon-button subtle" title="Aumentar prioridade" aria-label={`Aumentar prioridade: ${task.title}`} onClick={() => onPrioritize(task)}><ArrowUpRight size={16} /></button><button className="icon-button subtle delete-action" title="Excluir" aria-label={`Excluir: ${task.title}`} onClick={() => onDelete(task)}><Trash2 size={15} /></button></div>
   </article>
 }
 
-function TaskDetailModal({ task, categories, onClose, onSave, onDelete, onSkip }) {
+function TaskDetailModal({ task, categories, onClose, onSave, onDelete, onSkip, onPostpone }) {
   const [draft, setDraft] = useState(() => ({
     title: task.title || '', notes: task.notes || '', steps: (task.steps || []).map((step, index) => typeof step === 'string' ? { id: `step-${index}`, title: step, done: false } : { ...step }), category: task.category || 'Entrada',
     status: task.status || 'inbox', priority: String(task.priority || 2), due_at: inputDate(task.due_at),
-    task_type: task.task_type || 'tarefa', assignee: task.assignee || '', tags: (task.tags || []).join(', '), follow_up_at: inputDate(task.follow_up_at),
+    task_type: task.task_type || 'tarefa', assignee: task.assignee || '', tags: (task.tags || []).join(', '), tag_colors: task.tag_colors || {}, follow_up_at: inputDate(task.follow_up_at),
     estimated_minutes: task.estimated_minutes ? String(task.estimated_minutes) : '', reminder_at: dateTimeInput(task.reminder_at), recurrence: task.recurrence || 'nenhuma',
   }))
   const [newStep, setNewStep] = useState('')
@@ -117,29 +136,35 @@ function TaskDetailModal({ task, categories, onClose, onSave, onDelete, onSkip }
   }
   function toggleStep(id) { setDraft((current) => ({ ...current, steps: current.steps.map((step) => step.id === id ? { ...step, done: !step.done } : step) })) }
   function removeStep(id) { setDraft((current) => ({ ...current, steps: current.steps.filter((step) => step.id !== id) })) }
-  async function commit(status = draft.status) {
+  async function commit(status = draft.status, extraChanges = {}) {
     setSaving(true); setError('')
     const changes = {
       title: draft.title.trim(), notes: draft.notes.trim(), steps: draft.steps,
       category: draft.category, status, priority: Number(draft.priority), due_at: dateFromInput(draft.due_at),
-      task_type: draft.task_type, assignee: draft.assignee.trim(), tags: [...new Set(draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean))],
+      task_type: draft.task_type, assignee: draft.assignee.trim(), tags: [...new Set(draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean))], tag_colors: draft.tag_colors,
       follow_up_at: draft.task_type === 'cobranca' ? dateFromInput(draft.follow_up_at) : null,
       estimated_minutes: draft.estimated_minutes ? Number(draft.estimated_minutes) : null,
       reminder_at: dateTimeFromInput(draft.reminder_at),
       reminded_at: draft.reminder_at !== dateTimeInput(task.reminder_at) ? null : task.reminded_at || null,
       recurrence: draft.recurrence,
+      ...extraChanges,
     }
     if (status === 'done' && task.status !== 'done') changes.completed_at = new Date().toISOString()
-    if (!changes.title) { setError('Dê um nome para esta atividade.'); setSaving(false); return }
+    if (!changes.title) { setError('Dê um nome para esta atividade.'); setSaving(false); return false }
     const result = await onSave(task, changes, updateNote.trim())
     setSaving(false)
-    if (!result) { setError('Não consegui salvar agora. Tente novamente.'); return }
+    if (!result) { setError('Não consegui salvar agora. Tente novamente.'); return false }
     setDraft((current) => ({ ...current, status }))
     setUpdateNote('')
     if (status === 'done') onClose()
+    return true
   }
   async function save(event) { event?.preventDefault(); await commit() }
   async function registerCharge() { await commit('waiting') }
+  async function deferCharge() {
+    if (!draft.follow_up_at) { setError('Escolha a data em que quer voltar a cobrar.'); return }
+    if (await commit('waiting', { focus_date: null })) onPostpone?.(task, draft.follow_up_at)
+  }
   async function finish() { await commit('done') }
 
   return <div className="detail-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -147,14 +172,14 @@ function TaskDetailModal({ task, categories, onClose, onSave, onDelete, onSkip }
       <header className="detail-header"><div><span className="detail-eyebrow">DETALHES DA ATIVIDADE</span><h2 id="detail-title">Organize do seu jeito</h2><p>Atualize o contexto e deixe registrado o que aconteceu.</p></div><button className="icon-button detail-close" aria-label="Fechar detalhes" onClick={onClose}><X size={19} /></button></header>
       <form className="detail-form" onSubmit={save}>
         <div className="detail-fields">
-          <label className="detail-field detail-wide">Nome da atividade<input autoFocus value={draft.title} onChange={(event) => change('title', event.target.value)} maxLength="180" /></label>
+          <label className="detail-field detail-wide task-title-editor">Nome da atividade<input autoFocus value={draft.title} onChange={(event) => change('title', event.target.value)} maxLength="180" /></label>
+          <div className="detail-field detail-wide tag-editor"><span className="field-label-icon"><Tag size={14} /> Etiquetas rápidas</span><input value={draft.tags} onChange={(event) => change('tags', event.target.value)} placeholder="Palavras-chave separadas por vírgula" aria-label="Etiquetas da atividade" />{draft.tags.split(',').map((label) => label.trim()).filter(Boolean).map((label) => <label className="tag-color-row" key={label}><span className="task-tag" style={{ '--tag-color': draft.tag_colors[label] || '#16985d' }}>{label}</span><span>Cor</span><input aria-label={`Cor da etiqueta ${label}`} type="color" value={draft.tag_colors[label] || '#16985d'} onChange={(event) => change('tag_colors', { ...draft.tag_colors, [label]: event.target.value })} /></label>)}</div>
           <label className="detail-field">Tipo<select value={draft.task_type} onChange={(event) => change('task_type', event.target.value)}><option value="tarefa">Atividade</option><option value="cobranca">Cobrança</option></select></label>
           <label className="detail-field">Situação<select value={draft.status} onChange={(event) => change('status', event.target.value)}><option value="inbox">Caixa de entrada</option><option value="next">Próxima ação</option><option value="doing">Em andamento</option><option value="waiting">Aguardando retorno</option><option value="paused">Pausada</option>{(draft.task_type !== 'cobranca' || draft.status === 'done') && <option value="done">Concluída</option>}</select></label>
           <label className="detail-field">Categoria<select value={draft.category} onChange={(event) => change('category', event.target.value)}><option value="Entrada">Entrada</option>{categories.map((category) => <option value={category} key={category}>{category}</option>)}</select></label>
           <label className="detail-field">Prioridade<select value={draft.priority} onChange={(event) => change('priority', event.target.value)}><option value="1">Alta</option><option value="2">Média</option><option value="3">Baixa</option></select></label>
           <label className="detail-field">Previsão de conclusão<input type="date" value={draft.due_at} onChange={(event) => change('due_at', event.target.value)} /></label>
           <label className="detail-field">Responsável<input value={draft.assignee} onChange={(event) => change('assignee', event.target.value)} placeholder="Você ou outra pessoa" maxLength="100" /></label>
-          <label className="detail-field detail-wide"><span className="field-label-icon"><Tag size={14} /> Etiquetas</span><input value={draft.tags} onChange={(event) => change('tags', event.target.value)} placeholder="Ex.: cliente, financeiro, urgente" /><span>Separe por vírgulas.</span></label>
           {draft.task_type === 'cobranca' && <label className="detail-field detail-wide follow-up-field"><span className="field-label-icon"><History size={15} /> Próxima data para cobrar</span><input type="date" value={draft.follow_up_at} onChange={(event) => change('follow_up_at', event.target.value)} /><span>A cobrança continua aberta e volta ao foco nessa data.</span></label>}
           <section className="detail-field detail-wide step-builder"><span className="field-label-icon"><ListChecks size={14} /> Pequenos passos</span><p>Quebre a atividade em partes menores. Marque cada uma quando fizer sentido.</p><div className="step-list">{draft.steps.map((step) => <div className={`step-row ${step.done ? 'is-step-done' : ''}`} key={step.id}><label><input type="checkbox" checked={Boolean(step.done)} onChange={() => toggleStep(step.id)} /><span>{step.title}</span></label><button type="button" className="icon-button subtle" aria-label={`Remover passo ${step.title}`} onClick={() => removeStep(step.id)}><X size={14} /></button></div>)}</div><div className="step-add-row"><input value={newStep} onChange={(event) => setNewStep(event.target.value)} placeholder="Ex.: abrir o documento" maxLength="180" onKeyDown={(event) => { if (event.key === 'Enter') addStep(event) }} /><button type="button" className="secondary-button" disabled={!newStep.trim()} onClick={addStep}><Plus size={14} /> Adicionar passo</button></div></section>
           <label className="detail-field">Tempo estimado<select value={draft.estimated_minutes} onChange={(event) => change('estimated_minutes', event.target.value)}><option value="">Sem estimativa</option>{[5, 10, 15, 25, 30, 45, 60, 90, 120].map((minutes) => <option value={minutes} key={minutes}>{minutes < 60 ? `${minutes} minutos` : `${minutes / 60} hora${minutes > 60 ? 's' : ''}`}</option>)}</select></label>
@@ -167,10 +192,43 @@ function TaskDetailModal({ task, categories, onClose, onSave, onDelete, onSkip }
           <div className="timeline">{(task.history || []).length ? task.history.map((event) => <article className="timeline-entry" key={event.id}><span className="timeline-dot" /><div><div className="timeline-title">{eventLabels[event.event_type] || 'Atualização'}<time>{new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(event.created_at))}</time></div>{event.note && <p>{event.note}</p>}</div></article>) : <p className="timeline-empty">As próximas mudanças aparecerão aqui.</p>}</div>
         </section>
         {error && <div className="detail-error" role="alert">{error}</div>}
-        <footer className="detail-footer"><button type="button" className="detail-delete" onClick={() => onDelete(task)}><Trash2 size={15} /> Excluir</button><div className="detail-footer-actions">{draft.recurrence !== 'nenhuma' && draft.status !== 'done' && <button type="button" className="detail-cancel" onClick={() => onSkip(task)}>Pular esta vez</button>}<button type="button" className="detail-cancel" onClick={onClose}>Fechar</button>{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-charge" onClick={registerCharge} disabled={saving}><History size={15} /> Registrar cobrança</button>}<button className="primary-button detail-save" disabled={saving}>{saving ? 'Salvando…' : <><Save size={15} /> Salvar alterações</>}</button>{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-finish" onClick={finish} disabled={saving}><Check size={15} /> Concluir e arquivar</button>}</div></footer>
+        <footer className="detail-footer"><button type="button" className="detail-delete" onClick={() => onDelete(task)}><Trash2 size={15} /> Excluir</button><div className="detail-footer-actions">{draft.recurrence !== 'nenhuma' && draft.status !== 'done' && <button type="button" className="detail-cancel" onClick={() => onSkip(task)}>Pular esta vez</button>}<button type="button" className="detail-cancel" onClick={onClose}>Fechar</button>{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-charge" onClick={registerCharge} disabled={saving}><History size={15} /> Registrar retorno</button>}{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-defer" onClick={deferCharge} disabled={saving}><CalendarDays size={15} /> Agendar próxima cobrança</button>}<button className="primary-button detail-save" disabled={saving}>{saving ? 'Salvando…' : <><Save size={15} /> Salvar alterações</>}</button>{draft.task_type === 'cobranca' && draft.status !== 'done' && <button type="button" className="detail-finish" onClick={finish} disabled={saving}><Check size={15} /> Concluir e arquivar</button>}</div></footer>
       </form>
     </section>
   </div>
+}
+
+function FocusPicker({ tasks, focusedIds, onToggle, onClose }) {
+  const [search, setSearch] = useState('')
+  const candidates = tasks.filter((task) => { const scheduledLater = task.status === 'waiting' && task.follow_up_at && localDateString(new Date(task.follow_up_at)) > localDateString(); return task.status !== 'done' && !scheduledLater && [task.title, task.category, ...(task.tags || [])].join(' ').toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')) })
+  useEffect(() => { const close = (event) => { if (event.key === 'Escape') onClose() }; document.addEventListener('keydown', close); return () => document.removeEventListener('keydown', close) }, [onClose])
+  return <div className="detail-backdrop focus-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="focus-picker" role="dialog" aria-modal="true" aria-labelledby="focus-picker-title"><header><div><span className="detail-eyebrow">ESCOLHA SEM SAIR DO FOCO</span><h2 id="focus-picker-title">O que você quer priorizar?</h2><p>Selecione até três atividades. As escolhas podem mudar quando você quiser.</p></div><button className="icon-button detail-close" aria-label="Fechar seletor de foco" onClick={onClose}><X size={19} /></button></header><label className="focus-picker-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar atividade ou etiqueta" autoFocus /></label><div className="focus-picker-list">{candidates.map((task) => { const focused = focusedIds.has(task.id); const disabled = !focused && focusedIds.size >= 3; return <button key={task.id} className={`focus-choice ${focused ? 'selected' : ''}`} disabled={disabled} onClick={() => onToggle(task)}><span className="focus-choice-check">{focused && <Check size={15} />}</span><span><strong>{task.title}</strong><small>{task.category || 'Entrada'} · {task.status === 'inbox' ? 'Backlog' : task.status === 'doing' ? 'Em andamento' : task.status === 'waiting' ? 'Aguardando' : task.status === 'paused' ? 'Pausada' : 'Na fila'}</small></span>{task.tags?.slice(0,2).map((tag) => <span className="task-tag" key={tag} style={{'--tag-color':task.tag_colors?.[tag] || '#16985d'}}>{tag}</span>)}</button> })}{!candidates.length && <div className="focus-picker-empty">Nenhuma atividade encontrada. Tente outra busca ou capture algo novo.</div>}</div><footer><span>{focusedIds.size} de 3 escolhas</span><button className="primary-button" onClick={onClose}>Concluir escolha</button></footer></section></div>
+}
+
+function WaterBody({ progress }) {
+  const waterHeight = Math.max(0, Math.min(100, progress))
+  return <div className="water-body-card" role="img" aria-label={`Medidor visual de hidratação: ${waterHeight} por cento da meta`}><svg viewBox="0 0 180 250" aria-hidden="true"><defs><clipPath id="body-shape"><path d="M90 14c-17 0-29 13-29 29 0 9 4 17 11 22-5 8-9 18-10 30l-8 41-22 28c-6 8-4 19 4 24 7 4 16 2 20-5l25-34c2-3 4-6 5-10l4-21v109c0 10 8 18 18 18s18-8 18-18V118l4 21c1 4 3 7 5 10l25 34c5 7 14 9 21 5 8-5 10-16 4-24l-22-28-8-41c-2-12-5-22-10-30 7-5 11-13 11-22 0-16-13-29-29-29z" /></clipPath><linearGradient id="water-gradient" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#8ce4c0"/><stop offset="1" stopColor="#078e50"/></linearGradient></defs><path className="body-silhouette" d="M90 14c-17 0-29 13-29 29 0 9 4 17 11 22-5 8-9 18-10 30l-8 41-22 28c-6 8-4 19 4 24 7 4 16 2 20-5l25-34c2-3 4-6 5-10l4-21v109c0 10 8 18 18 18s18-8 18-18V118l4 21c1 4 3 7 5 10l25 34c5 7 14 9 21 5 8-5 10-16 4-24l-22-28-8-41c-2-12-5-22-10-30 7-5 11-13 11-22 0-16-13-29-29-29z"/><g clipPath="url(#body-shape)"><rect className="body-water" x="0" y={250-(250*waterHeight/100)} width="180" height="250" fill="url(#water-gradient)"/><path className="body-water-line" d={`M0 ${250-(250*waterHeight/100)} q45 -9 90 0 t90 0`} /></g></svg><strong>{waterHeight}%</strong><span>da meta de hoje</span></div>
+}
+
+const boardColumns = [
+  { status: 'inbox', label: 'Backlog', hint: 'Para organizar' },
+  { status: 'next', label: 'Próximas ações', hint: 'Na fila' },
+  { status: 'doing', label: 'Em andamento', hint: 'Começadas' },
+  { status: 'waiting', label: 'Aguardando', hint: 'Retorno' },
+  { status: 'paused', label: 'Pausadas', hint: 'Retomáveis' },
+  { status: 'done', label: 'Concluídas', hint: 'Conquistas' },
+]
+
+function KanbanBoard({ tasks, onOpen, onFocus, onStatus }) {
+  return <div className="kanban-board">{boardColumns.map((column) => { const items = tasks.filter((task) => task.status === column.status); return <section className="kanban-column" key={column.status}><header><div><h2>{column.label}</h2><span>{column.hint}</span></div><b>{items.length}</b></header><div className="kanban-cards">{items.map((task) => <article className="kanban-card" key={task.id}><button className="kanban-card-open" onClick={() => onOpen(task)}><strong>{task.title}</strong>{task.notes && <span>{task.notes}</span>}</button><div className="task-tags">{(task.tags || []).slice(0,3).map((tag) => <span className="task-tag" key={tag} style={{'--tag-color':task.tag_colors?.[tag] || '#16985d'}}>{tag}</span>)}</div><footer>{task.status !== 'done' && <button className="focus-action" onClick={() => onFocus(task)}><Target size={14}/><span>{task.focus_date === localDateString() ? 'No foco' : 'Colocar no foco'}</span></button>}{task.status === 'paused' && <button className="kanban-state-action" onClick={() => onStatus(task,{status:'next'})}>Retomar</button>}{task.status !== 'done' && task.status !== 'paused' && <button className="kanban-state-action" onClick={() => onStatus(task,{status:'paused'})}>Pausar</button>}</footer></article>)}</div></section> })}</div>
+}
+
+function WaterReminder({ profile, onChange, onEnable }) {
+  const [draft, setDraft] = useState(profile.settings || {})
+  useEffect(() => setDraft(profile.settings || {}), [profile.settings])
+  const update = (key, value) => setDraft((current) => ({ ...current, [key]: value }))
+  const saveNumber = (key) => onChange(key, Number(draft[key]))
+  return <div className="water-settings"><label>Minha meta diária<input type="number" min="250" max="10000" step="250" value={draft.water_goal_ml || 2000} onChange={(event) => update('water_goal_ml',event.target.value)} onBlur={() => saveNumber('water_goal_ml')}/><small>ml por dia</small></label><label>Volume da minha garrafa<input type="number" min="100" max="5000" step="50" value={draft.bottle_ml || 750} onChange={(event) => update('bottle_ml',event.target.value)} onBlur={() => saveNumber('bottle_ml')}/><small>ml por garrafa</small></label><label className="water-reminder-toggle"><span><strong>Lembretes gentis</strong><small>Enquanto o app estiver aberto.</small></span><input type="checkbox" checked={Boolean(draft.water_reminders)} onChange={(event) => { update('water_reminders',event.target.checked); onChange('water_reminders',event.target.checked); if(event.target.checked) onEnable() }}/></label>{draft.water_reminders && <label>Me lembrar a cada<select value={draft.water_reminder_minutes || 120} onChange={(event) => { update('water_reminder_minutes',Number(event.target.value)); onChange('water_reminder_minutes',Number(event.target.value)) }}><option value="45">45 minutos</option><option value="60">1 hora</option><option value="90">1h30</option><option value="120">2 horas</option><option value="180">3 horas</option></select></label>}</div>
 }
 
 function App() {
@@ -178,11 +236,14 @@ function App() {
   const [authLoading, setAuthLoading] = useState(supabaseReady)
   const [tab, setTab] = useState('home')
   const [tasks, setTasks] = useState([])
+  const [waterLogs, setWaterLogs] = useState([])
   const [profile, setProfile] = useState({ name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'], settings: { reduceMotion: false, highContrast: false } })
   const [messages, setMessages] = useState([])
   const [capture, setCapture] = useState('')
+  const [useCaptureSuggestions, setUseCaptureSuggestions] = useState(true)
   const [filter, setFilter] = useState('Tudo')
   const [queueView, setQueueView] = useState('lista')
+  const [focusPickerOpen, setFocusPickerOpen] = useState(false)
   const [sortBy, setSortBy] = useState('data')
   const [query, setQuery] = useState('')
   const [chatDraft, setChatDraft] = useState('')
@@ -195,10 +256,13 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState(null)
   const [pendingDelete, setPendingDelete] = useState(null)
   const [notificationPermission, setNotificationPermission] = useState(() => 'Notification' in window ? Notification.permission : 'unsupported')
+  const [systemPrefersDark, setSystemPrefersDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches || false)
+  const [waterSaving, setWaterSaving] = useState(false)
   const captureRef = useRef(null)
   const chatRef = useRef(null)
   const firedReminders = useRef(new Set())
   const focusActionLock = useRef(false)
+  const waterReminderAt = useRef(0)
 
   useEffect(() => {
     if (!supabaseReady) { setAuthLoading(false); return }
@@ -212,10 +276,18 @@ function App() {
     setLoadingWorkspace(true)
     loadWorkspace(user?.id).then((workspace) => {
       if (!alive) return
-      setTasks(workspace.tasks); setMessages(workspace.messages); setProfile(workspace.profile); setProfileName(workspace.profile.name || user?.email?.split('@')[0] || 'Alex')
+      setTasks(workspace.tasks); setWaterLogs(workspace.waterLogs || []); setMessages(workspace.messages); setProfile(workspace.profile); setProfileName(workspace.profile.name || user?.email?.split('@')[0] || 'Alex')
     }).catch((error) => showError(error)).finally(() => { if (alive) setLoadingWorkspace(false) })
     return () => { alive = false }
   }, [user?.id])
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!media) return
+    const update = () => setSystemPrefersDark(media.matches)
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [])
 
   useEffect(() => { if (tab === 'assistant') chatRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages, tab])
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => { setToast(''); setReminderTask(null) }, pendingDelete || reminderTask ? 8000 : 2800); return () => clearTimeout(timer) }, [toast, pendingDelete, reminderTask])
@@ -254,24 +326,40 @@ function App() {
     return () => clearInterval(timer)
   }, [tasks, user?.id])
 
+  useEffect(() => {
+    if (!profile.settings?.water_reminders) return
+    if (!waterReminderAt.current) waterReminderAt.current = Date.now()
+    const check = () => {
+      const interval = Number(profile.settings?.water_reminder_minutes || 120) * 60000
+      const todayLogs = waterLogs.filter((log) => localDateString(new Date(log.drank_at)) === localDateString())
+      const lastDrink = Math.max(waterReminderAt.current, todayLogs.length ? Math.max(...todayLogs.map((log) => new Date(log.drank_at).getTime())) : 0)
+      if (Date.now() - lastDrink < interval) return
+      waterReminderAt.current = Date.now()
+      setToast('Uma pausa para beber água pode ajudar. Sem pressa.')
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('AGIRMENTE', { body: 'Uma pausa para beber água pode ajudar.', icon: brandIcon, tag: 'agirmente-water' }) } catch {}
+    }
+    const timer = setInterval(check, 60000)
+    return () => clearInterval(timer)
+  }, [profile.settings?.water_reminders, profile.settings?.water_reminder_minutes, waterLogs])
+
   function showError(error) { setToast(error?.message || 'Não foi possível salvar agora. Tente de novo.') }
-  async function addTask(raw, category = 'Entrada') {
+  async function addTask(raw, category = 'Entrada', suggested = {}) {
     const title = cleanText(raw)
     if (!title) return null
-    const task = { id: makeId(), title, category, task_type: 'tarefa', assignee: '', tags: [], follow_up_at: null, status: 'inbox', priority: 3, due_at: null, reminder_at: null, reminded_at: null, estimated_minutes: null, focus_date: null, recurrence: 'nenhuma', notes: '', steps: [], history: [], created_at: new Date().toISOString() }
+    const task = { id: makeId(), title, category: suggested.category || category, task_type: 'tarefa', assignee: '', tags: suggested.tags || [], tag_colors: suggested.tag_colors || {}, follow_up_at: null, status: 'inbox', priority: suggested.priority || 3, due_at: suggested.due_at || null, reminder_at: null, reminded_at: null, estimated_minutes: suggested.estimated_minutes || null, focus_date: null, recurrence: 'nenhuma', notes: '', steps: [], history: [], created_at: new Date().toISOString() }
     try { const stored = await saveTask(task, user?.id, { event_type: 'criada', note: 'Atividade adicionada à fila.' }); setTasks((items) => [stored, ...items]); return stored } catch (error) { showError(error); return null }
   }
   async function updateTask(task, changes, activityNote = '') {
     if (changes.reminder_at !== undefined && changes.reminder_at !== task.reminder_at) firedReminders.current.delete(task.id)
     const updated = { ...task, ...changes, ...(changes.status === 'done' ? { focus_date: null, reminder_at: null, reminded_at: null } : {}) }
     let eventType = 'atualizada'
-    if (changes.status === 'done' && task.status !== 'done') eventType = 'concluida'
+      if (changes.status === 'done' && task.status !== 'done') eventType = 'concluida'
     else if (task.status === 'done' && changes.status && changes.status !== 'done') eventType = 'reaberta'
     else if (changes.status === 'waiting') eventType = updated.task_type === 'cobranca' ? 'cobranca_feita' : 'aguardando_alguem'
     else if (task.status === 'waiting' && changes.status) eventType = 'retomada'
     else if (changes.status === 'paused') eventType = 'pausada'
     else if (changes.status === 'doing') eventType = 'iniciada'
-    const defaultNote = eventType === 'cobranca_feita' ? 'Cobrança registrada; aguardando retorno.' : eventType === 'concluida' ? 'Atividade concluída e arquivada.' : eventType === 'pausada' ? 'Atividade pausada.' : eventType === 'iniciada' ? 'Atividade iniciada.' : eventType === 'retomada' ? 'Atividade retomada.' : eventType === 'reaberta' ? 'Atividade reaberta.' : eventType === 'aguardando_alguem' ? 'Atividade marcada como aguardando retorno.' : 'Detalhes da atividade atualizados.'
+    const defaultNote = eventType === 'cobranca_feita' ? (changes.follow_up_at ? `Nova cobrança agendada para ${dateLabel(changes.follow_up_at)}.` : 'Cobrança registrada; aguardando retorno.') : eventType === 'concluida' ? 'Atividade concluída e arquivada.' : eventType === 'pausada' ? 'Atividade pausada.' : eventType === 'iniciada' ? 'Atividade iniciada.' : eventType === 'retomada' ? 'Atividade retomada.' : eventType === 'reaberta' ? 'Atividade reaberta.' : eventType === 'aguardando_alguem' ? 'Atividade marcada como aguardando retorno.' : 'Detalhes da atividade atualizados.'
     try {
       const stored = await saveTask(updated, user?.id, { event_type: eventType, note: activityNote || defaultNote, details: { fields: Object.keys(changes), status: updated.status } })
       setTasks((items) => items.map((item) => item.id === task.id ? stored : item))
@@ -300,6 +388,7 @@ function App() {
   async function toggleFocus(task) {
     if (focusActionLock.current) return
     const today = localDateString()
+    if (task.status === 'waiting' && task.follow_up_at && localDateString(new Date(task.follow_up_at)) > today) { setToast(`Essa cobrança volta à fila em ${dateLabel(task.follow_up_at)}.`); return }
     const isFocused = task.focus_date === today
     if (!isFocused && focusTasks.length >= 3) { setToast('Seu foco já tem três atividades. Retire uma para abrir espaço.'); return }
     focusActionLock.current = true
@@ -331,13 +420,25 @@ function App() {
     const nextProfile = { ...profile, settings: { ...(profile.settings || {}), [key]: value } }
     try { const saved = await saveProfile(nextProfile, user?.id); setProfile(saved); setToast('Preferência atualizada.') } catch (error) { showError(error) }
   }
+  async function saveWaterEntry() {
+    if (waterSaving) return
+    setWaterSaving(true)
+    try { const log = await saveWaterLog(Number(profile.settings?.bottle_ml || 750), user?.id); setWaterLogs((items) => [log, ...items]); waterReminderAt.current = Date.now(); setToast(`Registrados ${Number(log.amount_ml).toLocaleString('pt-BR')} ml. Obrigado por cuidar de você.`) }
+    catch (error) { showError(error) }
+    finally { setWaterSaving(false) }
+  }
+  async function postponeCharge(task, followUpDate) {
+    setSelectedTaskId(null)
+    setToast(`Cobrança guardada para ${dateLabel(dateFromInput(followUpDate))}. Ela volta à fila nesse dia.`)
+  }
   const activeTasks = useMemo(() => tasks.filter((task) => task.status !== 'done'), [tasks])
-  const focusTasks = useMemo(() => activeTasks.filter((task) => task.focus_date === localDateString() && task.status !== 'paused'), [activeTasks])
+  const focusTasks = useMemo(() => activeTasks.filter((task) => task.focus_date === localDateString() && task.status !== 'paused' && !(task.status === 'waiting' && task.follow_up_at && localDateString(new Date(task.follow_up_at)) > localDateString())), [activeTasks])
   const visibleTasks = useMemo(() => tasks.filter((task) => {
     const searchable = [task.title, task.notes, task.assignee, ...(task.tags || [])].join(' ').toLocaleLowerCase('pt-BR')
     const matchesQuery = searchable.includes(query.toLocaleLowerCase('pt-BR'))
     const matchesFilter = filter === 'Tudo' || (filter.startsWith('Etiqueta:') ? (task.tags || []).includes(filter.slice(9)) : filter === 'Com lembrete' ? Boolean(task.reminder_at) : filter === 'Sem prazo' ? !task.due_at : filter === 'Caixa de entrada' ? task.status === 'inbox' : filter === 'Em andamento' ? task.status === 'doing' : filter === 'Aguardando retorno' ? task.status === 'waiting' : filter === 'Pausadas' ? task.status === 'paused' : filter === 'Concluídas' ? task.status === 'done' : task.category === filter)
-    return matchesQuery && matchesFilter
+    const deferred = task.status === 'waiting' && task.follow_up_at && localDateString(new Date(task.follow_up_at)) > localDateString()
+    return matchesQuery && matchesFilter && (filter !== 'Tudo' || !deferred)
   }).sort((a, b) => sortBy === 'prioridade' ? a.priority - b.priority : sortBy === 'tempo' ? (a.estimated_minutes || Infinity) - (b.estimated_minutes || Infinity) : (a.due_at || a.follow_up_at || '9999').localeCompare(b.due_at || b.follow_up_at || '9999')), [tasks, query, filter, sortBy])
   const agendaGroups = useMemo(() => {
     const groups = new Map()
@@ -355,7 +456,8 @@ function App() {
 
   async function handleCapture(event) {
     event?.preventDefault()
-    const task = await addTask(capture)
+    const suggestions = suggestTaskDetails(capture, profile.categories)
+    const task = await addTask(capture, 'Entrada', useCaptureSuggestions ? suggestions : {})
     if (task) { setCapture(''); setToast('Guardado na sua fila. Um passo de cada vez.') }
   }
   function toggleVoice() {
@@ -375,8 +477,8 @@ function App() {
       setMessages((items) => [...items, userMessage])
       const text = content.toLocaleLowerCase('pt-BR')
       let answer = 'Anotei o que você trouxe. Quer transformar em uma atividade ou pensar no próximo passo juntos?'
-      if (/^(adiciona|adicionar|cria|criar|anota|anotar|lembra|lembrar)/.test(text)) {
-        const title = content.replace(/^(adiciona(r)?|cria(r)?|anota(r)?|lembra(r)?)(\s+(uma tarefa|uma atividade|na fila|pra fila|para a fila))?\s*/i, '')
+      if (/^(adiciona|adicionar|cria|criar|anota|anotar|lembra|lembrar|guardar|guarda)/.test(text)) {
+        const title = content.replace(/^(adiciona(r)?|cria(r)?|anota(r)?|lembra(r)?|guarda(r)?)(\s+(uma tarefa|uma atividade|uma ideia|na fila|pra fila|para a fila))?\s*[:,-]?\s*/i, '')
         const created = await addTask(title)
         if (created) answer = `Coloquei “${created.title}” na sua fila. Por enquanto, isso já está cuidado.`
       } else if (/conclu|terminei|feito|finalizei/.test(text)) {
@@ -387,8 +489,23 @@ function App() {
         const target = activeTasks.find((task) => text.includes(task.title.toLocaleLowerCase('pt-BR')))
         if (target) { await updateTask(target, { status: 'paused' }); answer = `Deixei “${target.title}” pausada. Ela continua guardada para quando fizer sentido.` }
         else answer = 'Tudo bem deixar algo para depois. Qual atividade você quer pausar?'
+      } else if (/o que (eu )?(faço|faco|começo|comeco)|por onde começo|foco|prioriz|organiz(a|e|ar) (minha )?(fila|lista)/.test(text)) {
+        const ranked = [...activeTasks].filter((task) => task.status !== 'waiting' || !task.follow_up_at || localDateString(new Date(task.follow_up_at)) <= localDateString()).sort((a,b) => (a.due_at || a.follow_up_at || '9999').localeCompare(b.due_at || b.follow_up_at || '9999') || a.priority-b.priority || a.created_at.localeCompare(b.created_at))
+        const picks = focusTasks.length ? focusTasks : ranked.slice(0,3)
+        answer = picks.length ? `Vamos reduzir a escolha. Eu começaria por “${picks[0].title}”${picks[1] ? `, depois “${picks[1].title}”` : ''}${picks[2] ? ` e por fim “${picks[2].title}”` : ''}. Considerei prazo, prioridade e o que já está no seu foco. Peça “abrir [nome]” para organizar os detalhes, ou “colocar [nome] no foco”.` : 'Não há atividades ativas na fila. Se algo estiver na sua cabeça, escreva “guardar: ...” e eu ajudo a transformar em uma atividade.'
+      } else if (/abrir|detalhes|dividir|quebrar em passos|organizar atividade/.test(text)) {
+        const target = activeTasks.find((task) => text.includes(task.title.toLocaleLowerCase('pt-BR')))
+        if (target) { setSelectedTaskId(target.id); answer = `Abri os detalhes de “${target.title}”. Você pode ajustar prioridade, prazo, categoria, etiquetas e pequenos passos.` }
+        else answer = 'Diga o nome da atividade que você quer organizar, por exemplo: “abrir Enviar o relatório”.'
+      } else if (/coloca(r)? .*foco|adiciona(r)? .*foco/.test(text)) {
+        const target = activeTasks.find((task) => text.includes(task.title.toLocaleLowerCase('pt-BR')))
+        if (target) { await toggleFocus(target); answer = `Atualizei o Foco agora com “${target.title}”. Se já houver três escolhas, retire uma antes de adicionar outra.` }
+        else answer = 'Me diga o nome da atividade que quer colocar no Foco agora.'
+      } else if (/falta(m)? (informação|detalhe)|caixa de entrada|backlog|o que preciso organizar/.test(text)) {
+        const review = activeTasks.filter((task) => task.status === 'inbox').slice(0,5)
+        answer = review.length ? `Estas atividades estão no seu backlog e podem ganhar contexto antes de irem para a fila: ${review.map((task) => `“${task.title}”`).join(', ')}. Abra uma para incluir detalhes; quando estiver pronta, escolha “Próxima ação”.` : 'Seu backlog está limpo por agora. Posso sugerir prioridade para o que já está na fila.'
       } else if (/o que (eu )?(faço|faco|começo|comeco)|por onde começo|foco/.test(text)) {
-        answer = focusTasks.length ? `Se ajudar, seu próximo passo pode ser: “${focusTasks[0].title}”. Quer que eu divida em uma ação menor?` : 'Sua lista está tranquila por agora. Você pode capturar qualquer coisa que esteja na cabeça.'
+        answer = focusTasks.length ? `Seu foco já tem “${focusTasks[0].title}”. Se quiser, abra a atividade para dividir em um passo menor.` : 'Ainda não há escolhas no seu foco. Peça “organize minha fila” para eu recomendar até três opções, ou selecione as atividades que preferir na janela de Foco agora.'
       }
       const assistantMessage = await saveMessage({ role: 'assistant', content: answer }, user?.id)
       setMessages((items) => [...items, assistantMessage])
@@ -419,8 +536,15 @@ function App() {
   const inboxCount = tasks.filter((task) => task.status === 'inbox').length
   const doingCount = tasks.filter((task) => task.status === 'doing').length
   const completionRate = tasks.length ? Math.round((completedCount / tasks.length) * 100) : 0
+  const todayWaterLogs = waterLogs.filter((log) => localDateString(new Date(log.drank_at)) === localDateString())
+  const waterTotal = todayWaterLogs.reduce((total, log) => total + Number(log.amount_ml || 0), 0)
+  const waterGoal = Number(profile.settings?.water_goal_ml || 2000)
+  const waterProgress = waterGoal ? Math.min(100, Math.round(waterTotal / waterGoal * 100)) : 0
+  const captureSuggestions = capture.trim() ? suggestTaskDetails(capture, profile.categories) : null
+  const selectedAppearance = profile.settings?.appearance || 'system'
+  const effectiveTheme = selectedAppearance === 'system' ? systemPrefersDark ? 'dark' : 'light' : selectedAppearance
 
-  return <div className={`app-shell ${profile.settings?.highContrast ? 'high-contrast' : ''} ${profile.settings?.reduceMotion ? 'reduce-motion' : ''}`}>
+  return <div className={`app-shell ${profile.settings?.highContrast ? 'high-contrast' : ''} ${profile.settings?.reduceMotion ? 'reduce-motion' : ''}`} data-theme={effectiveTheme}>
     <aside className="sidebar">
       <button className="brand" onClick={() => setTab('home')}><BrandMark /><span className="brand-word">agirmente</span></button>
       <button className="capture-shortcut" onClick={() => { setTab('home'); setTimeout(() => captureRef.current?.focus(), 0) }}><Plus size={17} /><span>Capturar pensamento</span><kbd>⌘ K</kbd></button>
@@ -435,8 +559,8 @@ function App() {
       <div className="page-content">
         {loadingWorkspace ? <div className="page-loading">Organizando seu espaço…</div> : <>
           {tab === 'home' && <section className="home-page">
-            <div className="home-heading"><div className="home-greeting"><span className="greeting-icon"><Sun size={25} /></span><div><div className="date-overline">{new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</div><h1>{greeting()}, {firstName}<span className="heading-period">.</span></h1><p>Vamos organizar seu dia do seu jeito.</p></div></div><button className="quiet-button" onClick={() => setTab('focus')}><Compass size={16} /> Encontrar meu foco <ArrowRight size={15} /></button></div>
-            <form className="capture-card" onSubmit={handleCapture}><div className="capture-top"><span className="capture-glyph"><Sparkles size={18} /></span><div><strong>Tire da cabeça, coloque aqui.</strong><span>Uma ideia, uma tarefa, qualquer coisa.</span></div></div><div className="capture-input-row"><input ref={captureRef} value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="O que está passando pela sua cabeça?" aria-label="Capturar uma atividade"/><button type="button" className="voice-button" title="Capturar por voz" onClick={toggleVoice}><Mic size={17} /></button><button type="submit" className="capture-submit" disabled={!capture.trim()}>Guardar <ArrowRight size={15} /></button></div><div className="capture-footer"><span><Command size={12} /> Captura rápida</span><span>Sem pressão para organizar agora</span></div></form>
+            <div className="home-heading"><div className="home-greeting"><span className="greeting-icon"><Home size={25} /></span><div><div className="date-overline">{new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</div><h1>{greeting()}, {firstName}<span className="heading-period">.</span></h1><p>Vamos organizar seu dia do seu jeito.</p></div></div><button className="quiet-button" onClick={() => setTab('focus')}><Compass size={16} /> Encontrar meu foco <ArrowRight size={15} /></button></div>
+            <form className="capture-card" onSubmit={handleCapture}><div className="capture-top"><span className="capture-glyph"><Sparkles size={18} /></span><div><strong>Tire da cabeça, coloque aqui.</strong><span>Uma ideia, uma tarefa, qualquer coisa.</span></div></div><div className="capture-input-row"><input ref={captureRef} value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="O que está passando pela sua cabeça?" aria-label="Capturar uma atividade"/><button type="button" className="voice-button" title="Capturar por voz" onClick={toggleVoice}><Mic size={17} /></button><button type="submit" className="capture-submit" disabled={!capture.trim()}>Guardar <ArrowRight size={15} /></button></div>{captureSuggestions && <div className="capture-assistant-hint"><Sparkles size={15}/><span>Sugestão de organização: <strong>{captureSuggestions.category}</strong> · prioridade <strong>{captureSuggestions.priority === 1 ? 'alta' : captureSuggestions.priority === 2 ? 'média' : 'baixa'}</strong>{captureSuggestions.estimated_minutes && <> · cerca de <strong>{captureSuggestions.estimated_minutes} min</strong></>}{captureSuggestions.tags.length > 0 && <> · etiquetas {captureSuggestions.tags.map((tag) => `#${tag}`).join(' ')}</>}</span><label><input type="checkbox" checked={useCaptureSuggestions} onChange={(event) => setUseCaptureSuggestions(event.target.checked)}/> Aplicar</label></div>}<div className="capture-footer"><span><Command size={12} /> Captura rápida</span><span>Sem pressão para organizar agora</span></div></form>
             <div className="overview-cards" aria-label="Resumo das atividades">
               <article className="overview-card overview-card-green"><span className="overview-icon"><CheckCheck size={19} /></span><div><strong>{queuedCount}</strong><span>Atividades na fila</span></div><span className="overview-caption">guardadas com você</span></article>
               <article className="overview-card overview-card-blue"><span className="overview-icon"><Target size={19} /></span><div><strong>{focusTasks.length}<small> / 3</small></strong><span>No seu foco</span></div><span className="overview-caption">você escolhe o ritmo</span></article>
@@ -456,29 +580,34 @@ function App() {
             <div className="bottom-cards"><button className="bottom-card" onClick={() => { setTab('queue'); setFilter('Caixa de entrada') }}><span className="bottom-card-icon inbox-icon"><Inbox size={18} /></span><span className="bottom-card-copy"><strong>Caixa de entrada</strong><small>Ideias esperando um lugar</small></span><span className="bottom-card-count">{tasks.filter((task) => task.status === 'inbox').length}</span><ArrowRight size={16} className="bottom-card-arrow" /></button><button className="bottom-card" onClick={() => setTab('assistant')}><span className="bottom-card-icon assistant-icon"><Sparkles size={18} /></span><span className="bottom-card-copy"><strong>Precisa de clareza?</strong><small>Converse com seu assistente</small></span><ArrowRight size={16} className="bottom-card-arrow" /></button></div>
           </section>}
 
-          {tab === 'focus' && <section className="standard-page focus-page"><div className="page-title-block"><div className="page-icon focus-page-icon"><Target size={20} /></div><div className="date-overline">UM PASSO DE CADA VEZ</div><h1>Foco agora</h1><p>Até três escolhas suas para hoje. No seu ritmo, sem cobrança.</p></div><div className="focus-summary"><span><Focus size={16} /> {focusTasks.length ? `${focusTasks.length} ${focusTasks.length === 1 ? 'escolha' : 'escolhas'} para este momento` : 'Você decide quando começar'}</span><span>Seu foco pode mudar.</span></div><div className="focus-list">{focusTasks.map((task, index) => <div className="focus-item" key={task.id}><div className={`focus-item-number ${index === 0 ? 'current' : ''}`}>{index + 1}</div><div className="focus-item-content"><div className="focus-item-meta"><span>{task.category || 'Entrada'}</span>{task.due_at && <span><CalendarDays size={13} />{dateLabel(task.due_at)}</span>}{task.estimated_minutes && <span><Clock3 size={13} />{task.estimated_minutes} min</span>}{task.status === 'waiting' && <span className="task-waiting-pill">Aguardando retorno</span>}</div><h3><button className="focus-detail-link" onClick={() => openTask(task)}>{task.title}</button></h3>{task.notes && <p>{task.notes}</p>}{task.steps?.length > 0 && <div className="focus-step-preview">{task.steps.filter((step) => !step.done).length} passos restantes</div>}<div className="focus-item-actions">{task.status === 'waiting' ? <button className="primary-button small" onClick={() => openTask(task)}>Ver cobrança <ArrowRight size={15} /></button> : <button className="primary-button small" onClick={() => updateTask(task, { status: 'doing' })}>{task.status === 'doing' ? 'Em andamento' : 'Começar'}<ArrowRight size={15} /></button>}{task.status !== 'waiting' && <button className="quiet-button small-quiet" onClick={() => updateTask(task, { status: 'paused' })}>Deixar para depois</button>}<button className="quiet-button small-quiet" onClick={() => toggleFocus(task)}>Tirar do foco</button></div></div><button className="icon-button more-task" title="Mudar prioridade" onClick={() => promote(task)}><ArrowUpRight size={17} /></button></div>)}{focusTasks.length === 0 && <div className="empty-state focus-empty"><div className="empty-icon"><Sun size={21} /></div><h3>Você escolhe o que entra aqui.</h3><p>Adicione até três atividades pela sua fila. Elas continuam guardadas mesmo quando saem do foco.</p><button className="primary-button" onClick={() => setTab('queue')}>Escolher atividades <ArrowRight size={15} /></button></div>}</div><div className="focus-reassurance"><span className="reassurance-sparkle"><Sparkles size={15} /></span><span><strong>Você não precisa fazer tudo.</strong> Escolher um próximo passo já conta.</span></div></section>}
+          {tab === 'focus' && <section className="standard-page focus-page"><div className="focus-title-row"><div className="page-title-block"><div className="page-icon focus-page-icon"><Target size={20} /></div><div className="date-overline">UM PASSO DE CADA VEZ</div><h1>Foco agora</h1><p>Até três escolhas suas para hoje. No seu ritmo, sem cobrança.</p></div><button className="primary-button focus-choose-button" onClick={() => setFocusPickerOpen(true)}><Plus size={16}/> Escolher atividades</button></div><div className="focus-summary"><span><Focus size={16} /> {focusTasks.length ? `${focusTasks.length} ${focusTasks.length === 1 ? 'escolha' : 'escolhas'} para este momento` : 'Você decide quando começar'}</span><span>Seu foco pode mudar.</span></div><div className="focus-list">{focusTasks.map((task, index) => <div className="focus-item" key={task.id}><div className={`focus-item-number ${index === 0 ? 'current' : ''}`}>{index + 1}</div><div className="focus-item-content"><div className="focus-item-meta"><span>{task.category || 'Entrada'}</span>{task.due_at && <span><CalendarDays size={13} />{dateLabel(task.due_at)}</span>}{task.estimated_minutes && <span><Clock3 size={13} />{task.estimated_minutes} min</span>}{task.status === 'waiting' && <span className="task-waiting-pill">Aguardando retorno</span>}</div><h3><button className="focus-detail-link" onClick={() => openTask(task)}>{task.title}</button></h3>{task.tags?.length > 0 && <div className="task-tags">{task.tags.map((tag) => <span className="task-tag" key={tag} style={{'--tag-color':task.tag_colors?.[tag] || '#16985d'}}>{tag}</span>)}</div>}{task.notes && <p>{task.notes}</p>}{task.steps?.length > 0 && <div className="focus-step-preview">{task.steps.filter((step) => !step.done).length} passos restantes</div>}<div className="focus-item-actions">{task.status === 'waiting' ? <button className="primary-button small" onClick={() => openTask(task)}>Ver cobrança <ArrowRight size={15} /></button> : <button className="primary-button small" onClick={() => updateTask(task, { status: 'doing' })}>{task.status === 'doing' ? 'Em andamento' : 'Começar'}<ArrowRight size={15} /></button>}{task.status !== 'waiting' && <button className="quiet-button small-quiet" onClick={() => updateTask(task, { status: 'paused' })}>Deixar para depois</button>}<button className="quiet-button small-quiet" onClick={() => toggleFocus(task)}>Tirar do foco</button></div></div><button className="icon-button more-task" title="Mudar prioridade" onClick={() => promote(task)}><ArrowUpRight size={17} /></button></div>)}{focusTasks.length === 0 && <div className="empty-state focus-empty"><div className="empty-icon"><Target size={21} /></div><h3>Você escolhe o que entra aqui.</h3><p>Selecione atividades por esta janela. Você continua nesta tela e pode mudar de ideia depois.</p><button className="primary-button" onClick={() => setFocusPickerOpen(true)}>Escolher atividades <Plus size={15} /></button></div>}</div><div className="focus-reassurance"><span className="reassurance-sparkle"><Sparkles size={15} /></span><span><strong>Você não precisa fazer tudo.</strong> Escolher um próximo passo já conta.</span></div></section>}
+
+          {tab === 'health' && <section className="standard-page health-page"><div className="queue-heading"><div><div className="date-overline">CUIDADO FLEXÍVEL COM VOCÊ</div><h1>Saúde</h1><p>Registre a água do seu jeito. Uma garrafa por vez já conta.</p></div></div><div className="water-dashboard"><section className="water-progress-card"><div className="water-progress-copy"><span className="section-kicker">HIDRATAÇÃO DE HOJE</span><h2>{(waterTotal/1000).toLocaleString('pt-BR',{maximumFractionDigits:2})} <small>L</small></h2><p>Meta de {(waterGoal/1000).toLocaleString('pt-BR',{maximumFractionDigits:2})} L · {todayWaterLogs.length} {todayWaterLogs.length===1?'registro':'registros'}</p><div className="water-progress-track"><span style={{width:`${waterProgress}%`}}/></div><strong>{waterProgress}% da sua meta</strong><button className="primary-button water-drink-button" onClick={saveWaterEntry} disabled={waterSaving}><GlassWater size={17}/>{waterSaving?'Registrando…':`Terminei minha garrafa (${Number(profile.settings?.bottle_ml||750).toLocaleString('pt-BR')} ml)`}</button><span className="water-reassurance">A meta é uma referência pessoal, sem cobrança.</span></div><WaterBody progress={waterProgress}/></section><section className="profile-card water-settings-card"><div className="profile-section-title"><div><strong>Configure do seu jeito</strong><span>Escolha sua meta, a capacidade da garrafa e os lembretes.</span></div></div><WaterReminder profile={profile} onChange={updatePreference} onEnable={enableNotifications}/></section></div><section className="water-history-card"><div className="home-panel-heading"><div><div className="section-kicker">HOJE</div><h2>Seus registros</h2></div><span className="progress-period">{todayWaterLogs.length} {todayWaterLogs.length===1?'garrafa':'garrafas'}</span></div>{todayWaterLogs.length ? <div className="water-log-list">{todayWaterLogs.map((log) => <div className="water-log-row" key={log.id}><span className="water-log-icon"><GlassWater size={16}/></span><span><strong>{Number(log.amount_ml).toLocaleString('pt-BR')} ml</strong><small>{new Intl.DateTimeFormat('pt-BR',{hour:'2-digit',minute:'2-digit'}).format(new Date(log.drank_at))}</small></span><Check size={16}/></div>)}</div> : <div className="water-empty">Quando terminar uma garrafa, toque em “Terminei minha garrafa”. O registro fica só para você.</div>}</section></section>}
 
           {tab === 'queue' && <section className="standard-page queue-page">
             <div className="queue-heading"><div><div className="date-overline">SEU ESPAÇO, SEM PRESSA</div><h1>Minha fila</h1><p>Tudo o que você trouxe para cá, reunido em um só lugar.</p></div><button className="primary-button" onClick={() => { setTab('home'); setTimeout(() => captureRef.current?.focus(), 0) }}><Plus size={17} /> Nova atividade</button></div>
             <div className="queue-tools"><div className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar na sua fila" aria-label="Buscar atividade" />{query && <button className="icon-button" onClick={() => setQuery('')}><X size={15} /></button>}</div>
               <div className="filter-group" aria-label="Filtrar atividades"><Filter size={15} />{['Tudo', 'Caixa de entrada', 'Em andamento', 'Aguardando retorno', 'Pausadas', 'Concluídas', 'Com lembrete', 'Sem prazo', ...profile.categories, ...new Set(tasks.flatMap((task) => task.tags || []).map((tag) => `Etiqueta:${tag}`))].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? 'selected' : ''}`}>{item.startsWith('Etiqueta:') ? `#${item.slice(9)}` : item}</button>)}</div>
-              <div className="queue-view-controls"><label>Ordenar por<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="data">Data mais próxima</option><option value="prioridade">Prioridade</option><option value="tempo">Menor duração</option></select></label><div className="view-switch" aria-label="Visualização"><button className={queueView === 'lista' ? 'active' : ''} onClick={() => setQueueView('lista')}>Lista</button><button className={queueView === 'agenda' ? 'active' : ''} onClick={() => setQueueView('agenda')}><CalendarDays size={14} /> Agenda</button></div></div>
+              <div className="queue-view-controls"><label>Ordenar por<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="data">Data mais próxima</option><option value="prioridade">Prioridade</option><option value="tempo">Menor duração</option></select></label><div className="view-switch" aria-label="Visualização"><button className={queueView === 'lista' ? 'active' : ''} onClick={() => setQueueView('lista')}><List size={14}/> Lista</button><button className={queueView === 'agenda' ? 'active' : ''} onClick={() => setQueueView('agenda')}><CalendarRange size={14} /> Agenda</button><button className={queueView === 'kanban' ? 'active' : ''} onClick={() => setQueueView('kanban')}><Columns3 size={14}/> Quadro</button></div></div>
             </div>
             <div className="queue-count">{visibleTasks.length} {visibleTasks.length === 1 ? 'atividade' : 'atividades'}<span>·</span>organizadas do seu jeito</div>
-            {queueView === 'lista' ? <div className="queue-list">{visibleTasks.map((task) => <TaskRow key={task.id} task={task} categories={profile.categories} isFocused={task.focus_date === localDateString()} onToggleFocus={toggleFocus} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} />)}{visibleTasks.length === 0 && <div className="empty-state queue-empty"><div className="empty-icon"><Inbox size={20} /></div><strong>{query ? 'Não encontrei essa atividade.' : 'Este espaço está vazio.'}</strong><span>{query ? 'Experimente buscar com outras palavras.' : 'Quando algo surgir, você pode guardar aqui.'}</span></div>}</div> : <div className="agenda-list">{agendaGroups.map((group) => <section className="agenda-group" key={group.key}><div className="agenda-day-heading"><CalendarDays size={16} /><h2>{group.label}</h2><span>{group.items.length}</span></div>{group.items.map((task) => <TaskRow key={task.id} task={task} categories={profile.categories} isFocused={task.focus_date === localDateString()} onToggleFocus={toggleFocus} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} />)}</section>)}{agendaGroups.length === 0 && <div className="empty-state queue-empty"><div className="empty-icon"><CalendarDays size={20} /></div><strong>Nenhuma data nesta busca.</strong><span>Experimente limpar os filtros ou escolher a lista.</span></div>}</div>}
+            {queueView === 'lista' && <div className="queue-list-groups"><section className="queue-backlog"><header><div><span className="section-kicker">SEM PRESSA PARA ORGANIZAR</span><h2>Backlog <span>{visibleTasks.filter((task) => task.status === 'inbox').length}</span></h2><p>Capturas esperando contexto. Abra uma atividade para definir quando e como ela entra na fila.</p></div></header>{visibleTasks.filter((task) => task.status === 'inbox').map((task) => <TaskRow key={task.id} task={task} categories={profile.categories} isFocused={task.focus_date === localDateString()} onToggleFocus={toggleFocus} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} />)}</section><section className="queue-organized"><header><div><span className="section-kicker">PRÓXIMAS AÇÕES E ATIVIDADES</span><h2>Sua fila <span>{visibleTasks.filter((task) => task.status !== 'inbox').length}</span></h2></div></header>{visibleTasks.filter((task) => task.status !== 'inbox').map((task) => <TaskRow key={task.id} task={task} categories={profile.categories} isFocused={task.focus_date === localDateString()} onToggleFocus={toggleFocus} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} />)}</section>{visibleTasks.length === 0 && <div className="empty-state queue-empty"><div className="empty-icon"><Inbox size={20} /></div><strong>{query ? 'Não encontrei essa atividade.' : 'Este espaço está vazio.'}</strong><span>{query ? 'Experimente buscar com outras palavras.' : 'Quando algo surgir, você pode guardar aqui.'}</span></div>}</div>}
+            {queueView === 'agenda' && <div className="agenda-list">{agendaGroups.map((group) => <section className="agenda-group" key={group.key}><div className="agenda-day-heading"><CalendarDays size={16} /><h2>{group.label}</h2><span>{group.items.length}</span></div>{group.items.map((task) => <TaskRow key={task.id} task={task} categories={profile.categories} isFocused={task.focus_date === localDateString()} onToggleFocus={toggleFocus} onOpen={openTask} onStatus={updateTask} onDelete={deleteTask} onPrioritize={promote} onCategory={(item, category) => updateTask(item, { category })} />)}</section>)}{agendaGroups.length === 0 && <div className="empty-state queue-empty"><div className="empty-icon"><CalendarDays size={20} /></div><strong>Nenhuma data nesta busca.</strong><span>Experimente limpar os filtros ou escolher a lista.</span></div>}</div>}
+            {queueView === 'kanban' && <KanbanBoard tasks={visibleTasks} onOpen={openTask} onFocus={toggleFocus} onStatus={updateTask}/>}
           </section>}
 
-          {tab === 'assistant' && <section className="standard-page assistant-page"><div className="assistant-heading"><div><div className="page-icon assistant-page-icon"><Sparkles size={19} /></div><div className="date-overline">UM ESPAÇO PARA PENSAR EM VOZ ALTA</div><h1>Assistente</h1><p>Organize as ideias conversando. Sem respostas certas.</p></div><button className="quiet-button"><Clock3 size={15} /> Últimos 7 dias <ChevronDown size={14} /></button></div><div className="chat-card"><div className="chat-welcome"><div className="assistant-orb"><Sparkles size={19} /></div><h2>Por onde começamos?</h2><p>Você pode me contar o que está pesando, pedir para guardar uma ideia ou descobrir seu próximo passo.</p><div className="suggestion-row"><button onClick={() => setChatDraft('O que eu faço primeiro?')}>O que eu faço primeiro?</button><button onClick={() => setChatDraft('Adiciona na fila: ')}>Guardar uma atividade</button><button onClick={() => setChatDraft('Estou com muita coisa na cabeça')}>Estou com muita coisa na cabeça</button></div></div><div className="chat-messages">{messages.map((message) => <div className={`message ${message.role}`} key={message.id}><div className="message-avatar">{message.role === 'assistant' ? <Sparkles size={15} /> : firstName.slice(0, 1).toUpperCase()}</div><div className="message-content"><span>{message.role === 'assistant' ? 'Seu assistente' : 'Você'}</span><p>{message.content}</p></div></div>)}<div ref={chatRef} /></div><form className="chat-input" onSubmit={replyToAssistant}><textarea value={chatDraft} onChange={(event) => setChatDraft(event.target.value)} placeholder="Escreva do seu jeito…" rows="1" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); replyToAssistant(event) } }} /><div className="chat-input-footer"><span>Seu espaço é privado e sem julgamentos.</span><button className="send-button" disabled={!chatDraft.trim() || busy} aria-label="Enviar mensagem">{busy ? <span className="sending-dot" /> : <Send size={16} />}</button></div></form></div><div className="assistant-note"><Sparkles size={14} /><span>Respostas simples por enquanto. A inteligência do assistente pode evoluir com você.</span></div></section>}
+          {tab === 'assistant' && <section className="standard-page assistant-page"><div className="assistant-heading"><div><div className="page-icon assistant-page-icon"><Sparkles size={19} /></div><div className="date-overline">UM ESPAÇO PARA PENSAR EM VOZ ALTA</div><h1>Assistente</h1><p>Peça ajuda para priorizar, organizar uma atividade ou capturar uma ideia.</p></div><span className="quiet-button"><Clock3 size={15} /> Histórico de 7 dias</span></div><div className="chat-card"><div className="chat-welcome"><div className="assistant-orb"><Sparkles size={19} /></div><h2>Por onde começamos?</h2><p>Escreva do seu jeito. Posso sugerir prioridades, mostrar o que está no backlog e abrir os detalhes de uma atividade.</p><div className="suggestion-row"><button onClick={() => setChatDraft('Organize minha fila')}>Me ajude a priorizar</button><button onClick={() => setChatDraft('O que está no backlog?')}>O que preciso organizar?</button><button onClick={() => setChatDraft('O que eu faço primeiro?')}>Qual o próximo passo?</button><button onClick={() => setChatDraft('Guardar: ')}>Guardar uma ideia</button></div></div><div className="chat-messages">{messages.map((message) => <div className={`message ${message.role}`} key={message.id}><div className="message-avatar">{message.role === 'assistant' ? <Sparkles size={15} /> : firstName.slice(0, 1).toUpperCase()}</div><div className="message-content"><span>{message.role === 'assistant' ? 'Seu assistente' : 'Você'}</span><p>{message.content}</p></div></div>)}<div ref={chatRef} /></div><form className="chat-input" onSubmit={replyToAssistant}><textarea value={chatDraft} onChange={(event) => setChatDraft(event.target.value)} placeholder="Escreva do seu jeito…" rows="1" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); replyToAssistant(event) } }} /><div className="chat-input-footer"><span>Respostas locais, sem enviar suas atividades a serviços externos.</span><button className="send-button" disabled={!chatDraft.trim() || busy} aria-label="Enviar mensagem">{busy ? <span className="sending-dot" /> : <Send size={16} />}</button></div></form></div><div className="assistant-note"><Sparkles size={14} /><span>O assistente usa regras locais para organizar e sugerir próximos passos. Você decide o que aplicar.</span></div></section>}
 
           {tab === 'profile' && <section className="standard-page profile-page"><div className="date-overline">AJUSTE O ESPAÇO AO SEU JEITO</div><h1>Seu perfil</h1><p>Pequenas preferências para deixar o AGIRMENTE mais seu.</p><div className="profile-card"><div className="profile-card-heading"><div className="large-avatar">{(profileName || 'A').slice(0, 1).toUpperCase()}</div><div><strong>{profileName}</strong><span>{user?.email || 'Perfil local neste dispositivo'}</span></div><span className="quiet-button profile-edit-hint"><Settings2 size={15} /> Preferências</span></div><form onSubmit={saveName} className="profile-form"><label htmlFor="profile-name">Como gostaria de ser chamado?</label><div className="profile-input-row"><input id="profile-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength="60" /><button className="secondary-button">Salvar nome</button></div></form><div className="profile-divider" /><div className="profile-section-title"><div><strong>Suas categorias</strong><span>Use as palavras que fazem sentido para você.</span></div></div><div className="category-list">{profile.categories.map((category) => <span key={category} className="category-chip">{category}</span>)}</div><form className="category-add" onSubmit={updateCategories}><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Criar uma categoria" maxLength="32" /><button type="submit" disabled={!cleanText(newCategory)}><Plus size={15} /> Adicionar</button></form><div className="profile-divider" /><div className="profile-settings-row"><div><strong>Seu espaço de trabalho</strong><span>{supabaseReady ? 'Sincronização segura com sua conta Supabase' : 'Este navegador guarda seus dados localmente'}</span></div><span className={`connection-pill ${supabaseReady ? 'is-connected' : ''}`}><span />{supabaseReady ? 'Conectado' : 'Local'}</span></div>{supabaseReady && <button className="sign-out-button" onClick={() => supabase.auth.signOut()}><LogOut size={16} /> Sair da conta</button>}</div>
-            <section className="profile-card accessibility-card"><div className="profile-section-title"><div><strong>Preferências de acessibilidade</strong><span>Faça o espaço acompanhar o que funciona para você.</span></div></div><label className="preference-toggle"><span><strong>Contraste reforçado</strong><small>Realça textos, bordas e controles.</small></span><input type="checkbox" checked={Boolean(profile.settings?.highContrast)} onChange={(event) => updatePreference('highContrast', event.target.checked)} /></label><label className="preference-toggle"><span><strong>Reduzir animações</strong><small>Diminui movimentos e transições na interface.</small></span><input type="checkbox" checked={Boolean(profile.settings?.reduceMotion)} onChange={(event) => updatePreference('reduceMotion', event.target.checked)} /></label><div className="notification-preference"><div><strong>Lembretes neste navegador</strong><small>{notificationPermission === 'granted' ? 'Notificações de área de trabalho ativadas.' : notificationPermission === 'denied' ? 'Permissão negada pelo navegador; os avisos aparecem no app.' : 'Ative para receber avisos quando o app estiver aberto.'}</small></div><button className="secondary-button" onClick={enableNotifications}>{notificationPermission === 'granted' ? 'Ativadas' : 'Ativar'}</button></div></section>
+            <section className="profile-card accessibility-card"><div className="profile-section-title"><div><strong>Aparência e acessibilidade</strong><span>Escolha o tema e ajuste a leitura ao que funciona para você.</span></div></div><label className="theme-setting">Aparência<select value={profile.settings?.appearance || 'system'} onChange={(event) => updatePreference('appearance',event.target.value)}><option value="system">Automática · acompanhar o sistema</option><option value="light">Claro</option><option value="dark">Escuro · verde profundo</option></select></label><label className="preference-toggle"><span><strong>Contraste reforçado</strong><small>Realça textos, bordas e controles.</small></span><input type="checkbox" checked={Boolean(profile.settings?.highContrast)} onChange={(event) => updatePreference('highContrast', event.target.checked)} /></label><label className="preference-toggle"><span><strong>Reduzir animações</strong><small>Diminui movimentos e transições na interface.</small></span><input type="checkbox" checked={Boolean(profile.settings?.reduceMotion)} onChange={(event) => updatePreference('reduceMotion', event.target.checked)} /></label><div className="notification-preference"><div><strong>Lembretes neste navegador</strong><small>{notificationPermission === 'granted' ? 'Notificações de área de trabalho ativadas.' : notificationPermission === 'denied' ? 'Permissão negada pelo navegador; os avisos aparecem no app.' : 'Ative para receber avisos quando o app estiver aberto.'}</small></div><button className="secondary-button" onClick={enableNotifications}>{notificationPermission === 'granted' ? 'Ativadas' : 'Ativar'}</button></div></section>
             <div className="privacy-note"><CircleHelp size={16} /><span>Seu jeito de pensar não precisa caber em um padrão. Você pode reorganizar suas categorias quando quiser.</span></div></section>}
         </>}
       </div>
       <footer className="app-footer"><span>AGIRMENTE</span><span>Seu jeito de pensar. Sua maneira de transformar.</span><button onClick={() => setTab('profile')}>Preferências de acessibilidade <ArrowRight size={13} /></button></footer>
     </main>
     <nav className="mobile-nav">{navigation.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={19} /><span>{label}</span></button>)}</nav>
-    {selectedTask && <TaskDetailModal key={selectedTask.id} task={selectedTask} categories={profile.categories} onClose={() => setSelectedTaskId(null)} onSave={updateTask} onDelete={deleteTask} onSkip={skipOccurrence} />}
+    {selectedTask && <TaskDetailModal key={selectedTask.id} task={selectedTask} categories={profile.categories} onClose={() => setSelectedTaskId(null)} onSave={updateTask} onDelete={deleteTask} onSkip={skipOccurrence} onPostpone={postponeCharge} />}
+    {focusPickerOpen && <FocusPicker tasks={activeTasks} focusedIds={new Set(focusTasks.map((task) => task.id))} onToggle={toggleFocus} onClose={() => setFocusPickerOpen(false)} />}
     {toast && <div className="toast"><span className="toast-icon"><Check size={14} /></span>{toast}{pendingDelete && <button className="toast-undo" onClick={undoDelete}>Desfazer</button>}{reminderTask && <><button className="toast-undo" onClick={() => snoozeReminder(10)}>10 min</button><button className="toast-undo" onClick={() => snoozeReminder(1440)}>Amanhã</button></>}<button className="toast-close" onClick={() => { setToast(''); setReminderTask(null) }}><X size={14} /></button></div>}
   </div>
 }

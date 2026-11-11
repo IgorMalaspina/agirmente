@@ -2,7 +2,7 @@ import { supabase, supabaseReady } from './supabase.js'
 
 const STORAGE_KEY = 'agirmente:v1'
 const chatKey = (userId) => `${STORAGE_KEY}:assistant:${userId || 'local'}`
-const defaultProfile = () => ({ name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'], settings: { reduceMotion: false, highContrast: false } })
+const defaultProfile = () => ({ name: 'Alex', categories: ['Pessoal', 'Trabalho', 'Saúde', 'Ideias'], settings: { reduceMotion: false, highContrast: false, appearance: 'system', water_goal_ml: 2000, bottle_ml: 750, water_reminders: false, water_reminder_minutes: 120 } })
 const now = new Date()
 const later = (days) => new Date(now.getTime() + days * 86400000).toISOString()
 
@@ -15,12 +15,13 @@ const starterTasks = [
 function getLocalState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY))
-    if (saved) return { tasks: saved.tasks ?? starterTasks, messages: (saved.messages ?? []).filter((m) => Date.now() - new Date(m.created_at).getTime() < 7 * 86400000), profile: { ...defaultProfile(), ...(saved.profile || {}), settings: { ...defaultProfile().settings, ...(saved.profile?.settings || {}) } } }
+    if (saved) return { tasks: saved.tasks ?? starterTasks, waterLogs: saved.waterLogs ?? [], messages: (saved.messages ?? []).filter((m) => Date.now() - new Date(m.created_at).getTime() < 7 * 86400000), profile: { ...defaultProfile(), ...(saved.profile || {}), settings: { ...defaultProfile().settings, ...(saved.profile?.settings || {}) } } }
   } catch {}
   return { tasks: starterTasks, messages: [], profile: defaultProfile() }
 }
 
 let localState = getLocalState()
+localState.waterLogs ||= []
 const persist = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(localState))
 const readMessages = (userId) => {
   try { return (JSON.parse(localStorage.getItem(chatKey(userId))) ?? []).filter((message) => Date.now() - new Date(message.created_at).getTime() < 7 * 86400000) } catch { return [] }
@@ -44,6 +45,7 @@ const mapTaskFromDatabase = (task) => ({
   task_type: task.task_type || 'tarefa',
   assignee: task.assignee || '',
   tags: Array.isArray(task.tags) ? task.tags : [],
+  tag_colors: task.tag_colors && typeof task.tag_colors === 'object' ? task.tag_colors : {},
   follow_up_at: task.follow_up_at || null,
   history: task.history || [],
 })
@@ -60,6 +62,7 @@ function mapTaskToDatabase(task, userId) {
     task_type: task.task_type || 'tarefa',
     assignee: task.assignee || null,
     tags: Array.isArray(task.tags) ? task.tags : [],
+    tag_colors: task.tag_colors && typeof task.tag_colors === 'object' ? task.tag_colors : {},
     follow_up_at: task.follow_up_at || null,
     status: statusToDatabase[status] || 'entrada',
     priority: priorityToDatabase[task.priority] || 'media',
@@ -82,12 +85,17 @@ function mapTaskToDatabase(task, userId) {
 
 export async function loadWorkspace(userId) {
   if (!supabaseReady) return { ...localState, mode: 'local' }
-  const [{ data: rows, error }, { data: eventRows, error: eventError }, { data: authData, error: authError }] = await Promise.all([
+  const [taskResult, eventResult, authResult, waterResult] = await Promise.all([
     supabase.from('tasks').select('*').eq('user_id', userId).order('position', { ascending: true }).order('created_at', { ascending: false }),
     supabase.from('task_events').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
     supabase.auth.getUser(),
+    supabase.from('water_logs').select('*').eq('user_id', userId).order('drank_at', { ascending: false }),
   ])
-  if (error || eventError || authError) throw error || eventError || authError
+  const { data: rows, error } = taskResult
+  const { data: eventRows, error: eventError } = eventResult
+  const { data: authData, error: authError } = authResult
+  const { data: waterRows, error: waterError } = waterResult
+  if (error || eventError || authError || waterError) throw error || eventError || authError || waterError
   const historyByTask = (eventRows || []).reduce((history, event) => {
     history[event.task_id] ||= []
     history[event.task_id].push(event)
@@ -96,10 +104,24 @@ export async function loadWorkspace(userId) {
   const metadata = authData.user?.user_metadata || {}
   return {
     tasks: (rows || []).map((row) => mapTaskFromDatabase({ ...row, history: historyByTask[row.id] || [] })),
+    waterLogs: waterRows || [],
     profile: { ...defaultProfile(), name: metadata.name || authData.user?.email?.split('@')[0] || '', categories: Array.isArray(metadata.categories) ? metadata.categories : defaultProfile().categories, settings: { ...defaultProfile().settings, ...(metadata.settings || {}) } },
     messages: readMessages(userId),
     mode: 'cloud',
   }
+}
+
+export async function saveWaterLog(amountMl, userId) {
+  const entry = { user_id: userId, amount_ml: Number(amountMl), drank_at: new Date().toISOString() }
+  if (supabaseReady) {
+    const { data, error } = await supabase.from('water_logs').insert(entry).select().single()
+    if (error) throw error
+    return data
+  }
+  const stored = { ...entry, id: makeLocalId() }
+  localState.waterLogs = [stored, ...(localState.waterLogs || [])]
+  persist()
+  return stored
 }
 
 export async function saveTask(task, userId, activityEvent = null) {
